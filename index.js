@@ -132,7 +132,7 @@ function loadJSON(filePath, defaultData) {
 }
 
 /* =========================================================
-   PER-SERVER CONFIGS (CHANNELS & CUSTOM MESSAGES)
+   PER-SERVER CONFIGS (CHANNELS, CUSTOM MESSAGES & STAFF)
 ========================================================= */
 let serverConfigs = loadJSON("./server_configs.json", {});
 
@@ -152,8 +152,22 @@ const DEFAULT_GUILD_CONFIG = {
     welcome: "🎉 Welcome {user} to **{server}**! You are member **#{memberCount}**.",
     goodbye: "👋 Goodbye **{username}**, thanks for spending time in **{server}**!",
     boost: "🚀 Thank you {user} for boosting **{server}**!"
+  },
+  staff: {
+    users: {},
+    roleLinks: {}
   }
 };
+
+function ensureStaffConfig(cfg) {
+  if (!cfg.staff) {
+    cfg.staff = { users: {}, roleLinks: {} };
+  } else {
+    cfg.staff.users = cfg.staff.users || {};
+    cfg.staff.roleLinks = cfg.staff.roleLinks || {};
+  }
+  return cfg.staff;
+}
 
 function getGuildConfig(guildId) {
   if (!guildId) return DEFAULT_GUILD_CONFIG;
@@ -163,7 +177,11 @@ function getGuildConfig(guildId) {
   } else {
     serverConfigs[guildId] = {
       channels: { ...DEFAULT_GUILD_CONFIG.channels, ...(serverConfigs[guildId].channels || {}) },
-      messages: { ...DEFAULT_GUILD_CONFIG.messages, ...(serverConfigs[guildId].messages || {}) }
+      messages: { ...DEFAULT_GUILD_CONFIG.messages, ...(serverConfigs[guildId].messages || {}) },
+      staff: {
+        users: { ...(serverConfigs[guildId].staff?.users || {}) },
+        roleLinks: { ...(serverConfigs[guildId].staff?.roleLinks || {}) }
+      }
     };
   }
   return serverConfigs[guildId];
@@ -181,6 +199,114 @@ function formatTemplate(template, { member, guild, level }) {
     .replace(/\{server\}/gi, guild?.name || "Server")
     .replace(/\{memberCount\}/gi, String(guild?.memberCount ?? ""))
     .replace(/\{level\}/gi, String(level ?? ""));
+}
+
+/* =========================================================
+   PER-SERVER OWNER & STAFF ROLE HIERARCHY ENGINE
+========================================================= */
+const STAFF_ROLES_META = {
+  ceo: { label: "CEO / Chief", rank: 2 },
+  senior_admin: { label: "Senior Admin", rank: 3 },
+  junior_admin: { label: "Junior Admin", rank: 4 },
+  manager: { label: "Manager", rank: 5 },
+  senior_moderator: { label: "Senior Moderator", rank: 6 },
+  junior_moderator: { label: "Junior Moderator", rank: 7 },
+  support_staff: { label: "Support Staff", rank: 8 }
+};
+
+function isServerOwner(memberOrUser, guild) {
+  const userId = memberOrUser?.id || memberOrUser?.user?.id;
+  const g = guild || memberOrUser?.guild;
+  if (!userId || !g) return false;
+  return userId === g.ownerId;
+}
+
+function getMemberStaffRank(member) {
+  if (!member || !member.guild) return 99;
+  if (member.id === member.guild.ownerId) return 1;
+
+  const cfg = getGuildConfig(member.guild.id);
+  const staffCfg = ensureStaffConfig(cfg);
+
+  let bestRank = 99;
+  const assignedRoles = Array.isArray(staffCfg.users[member.id]) ? staffCfg.users[member.id] : [];
+
+  for (const rKey of assignedRoles) {
+    const meta = STAFF_ROLES_META[rKey];
+    if (meta && meta.rank < bestRank) bestRank = meta.rank;
+  }
+
+  for (const [rKey, discordRoleId] of Object.entries(staffCfg.roleLinks)) {
+    if (discordRoleId && member.roles?.cache?.has(discordRoleId)) {
+      const meta = STAFF_ROLES_META[rKey];
+      if (meta && meta.rank < bestRank) bestRank = meta.rank;
+    }
+  }
+
+  return bestRank;
+}
+
+function hasStaffRole(member, roleKey) {
+  if (!member || !member.guild) return false;
+  if (member.id === member.guild.ownerId) return true;
+
+  const cfg = getGuildConfig(member.guild.id);
+  const staffCfg = ensureStaffConfig(cfg);
+
+  const userRoles = Array.isArray(staffCfg.users[member.id]) ? staffCfg.users[member.id] : [];
+  if (userRoles.includes(roleKey)) return true;
+
+  const linkedDiscordRoleId = staffCfg.roleLinks[roleKey];
+  if (linkedDiscordRoleId && member.roles?.cache?.has(linkedDiscordRoleId)) return true;
+
+  return false;
+}
+
+function canViewAllPrivate(member) {
+  return getMemberStaffRank(member) <= 3;
+}
+
+function canManageTickets(member) {
+  return getMemberStaffRank(member) <= 8;
+}
+
+function canWarn(member) {
+  return getMemberStaffRank(member) <= 7;
+}
+
+function canMute(member) {
+  return getMemberStaffRank(member) <= 7;
+}
+
+function canManageChat(member) {
+  return getMemberStaffRank(member) <= 6;
+}
+
+function canBan(member) {
+  return getMemberStaffRank(member) <= 4;
+}
+
+function isGuildAdmin(member) {
+  return getMemberStaffRank(member) <= 3;
+}
+
+function isStaff(member) {
+  return getMemberStaffRank(member) <= 8;
+}
+
+function canActOnTarget(actor, targetMember) {
+  if (!actor || !targetMember) return true;
+  if (actor.id === actor.guild?.ownerId) return true;
+  if (targetMember.id === actor.guild?.ownerId) return false;
+
+  const actorRank = getMemberStaffRank(actor);
+  const targetRank = getMemberStaffRank(targetMember);
+
+  if (hasStaffRole(actor, "manager") && targetRank <= 4) {
+    return false;
+  }
+
+  return actorRank < targetRank;
 }
 
 /* =========================
@@ -262,7 +388,7 @@ function recordNukeAction(userId, actionType) {
 }
 
 async function triggerNukeDefense(guild, executor, actionName, count) {
-  if (!executor || executor.id === guild.ownerId || executor.id === OWNER_ID || executor.id === client.user.id) return;
+  if (!executor || executor.id === guild.ownerId || executor.id === client.user.id) return;
 
   try {
     await guild.members.ban(executor.id, {
@@ -303,40 +429,8 @@ async function triggerNukeDefense(guild, executor, actionName, count) {
 }
 
 /* =========================
-   MODERATION SYSTEM
+   MODERATION STORAGE
 ========================= */
-const OWNER_ID = "1354755206528630894";
-
-const STAFF_USER_IDS = [
-  "1504160922376081480",
-  "1548718895173730407",
-  "1529537332112261344",
-  "1272908975813165114",
-  "1500677494934737050",
-  "1306625186354692228",
-  "1427534146019921981"
-];
-
-function isStaff(member) {
-  if (!member) return false;
-  return (
-    member.id === member.guild?.ownerId ||
-    member.id === OWNER_ID ||
-    STAFF_USER_IDS.includes(member.id) ||
-    member.permissions.has(PermissionsBitField.Flags.Administrator) ||
-    member.permissions.has(PermissionsBitField.Flags.ModerateMembers)
-  );
-}
-
-function isGuildAdmin(member) {
-  if (!member) return false;
-  return (
-    member.id === member.guild?.ownerId ||
-    member.id === OWNER_ID ||
-    member.permissions.has(PermissionsBitField.Flags.Administrator)
-  );
-}
-
 let warnings = loadJSON("./warnings.json", {});
 let levels = loadJSON("./levels.json", {});
 let mutes = loadJSON("./mutes.json", {});
@@ -512,6 +606,75 @@ const inviteCache = new Map();
    SLASH COMMAND DEFINITIONS (GLOBAL)
 ========================= */
 const commands = [
+  new SlashCommandBuilder()
+    .setName("staff")
+    .setDescription("Manage per-server staff roles and hierarchy (Server Owner Only)")
+    .addSubcommand(sub =>
+      sub.setName("add")
+        .setDescription("Assign a staff role to a user in this server")
+        .addUserOption(o => o.setName("user").setDescription("Target user").setRequired(true))
+        .addStringOption(o =>
+          o.setName("role")
+            .setDescription("Staff role to assign")
+            .setRequired(true)
+            .addChoices(
+              { name: "CEO / Chief", value: "ceo" },
+              { name: "Senior Admin", value: "senior_admin" },
+              { name: "Junior Admin", value: "junior_admin" },
+              { name: "Manager", value: "manager" },
+              { name: "Senior Moderator", value: "senior_moderator" },
+              { name: "Junior Moderator", value: "junior_moderator" },
+              { name: "Support Staff", value: "support_staff" }
+            )
+        )
+    )
+    .addSubcommand(sub =>
+      sub.setName("remove")
+        .setDescription("Remove a staff role from a user in this server")
+        .addUserOption(o => o.setName("user").setDescription("Target user").setRequired(true))
+        .addStringOption(o =>
+          o.setName("role")
+            .setDescription("Staff role to remove")
+            .setRequired(true)
+            .addChoices(
+              { name: "CEO / Chief", value: "ceo" },
+              { name: "Senior Admin", value: "senior_admin" },
+              { name: "Junior Admin", value: "junior_admin" },
+              { name: "Manager", value: "manager" },
+              { name: "Senior Moderator", value: "senior_moderator" },
+              { name: "Junior Moderator", value: "junior_moderator" },
+              { name: "Support Staff", value: "support_staff" }
+            )
+        )
+    )
+    .addSubcommand(sub =>
+      sub.setName("linkrole")
+        .setDescription("Link a Discord @Role to a staff hierarchy tier")
+        .addStringOption(o =>
+          o.setName("tier")
+            .setDescription("Staff hierarchy tier")
+            .setRequired(true)
+            .addChoices(
+              { name: "CEO / Chief", value: "ceo" },
+              { name: "Senior Admin", value: "senior_admin" },
+              { name: "Junior Admin", value: "junior_admin" },
+              { name: "Manager", value: "manager" },
+              { name: "Senior Moderator", value: "senior_moderator" },
+              { name: "Junior Moderator", value: "junior_moderator" },
+              { name: "Support Staff", value: "support_staff" }
+            )
+        )
+        .addRoleOption(o =>
+          o.setName("role")
+            .setDescription("Discord role to link (leave empty to unlink)")
+            .setRequired(false)
+        )
+    )
+    .addSubcommand(sub =>
+      sub.setName("list")
+        .setDescription("View all assigned staff roles in this server")
+    ),
+
   new SlashCommandBuilder()
     .setName("setchannel")
     .setDescription("Set a channel for a specific bot feature (Admin Only)")
@@ -808,6 +971,7 @@ client.once("ready", async () => {
 
   // Cache invites across all servers
   client.guilds.cache.forEach(async (guild) => {
+    getGuildConfig(guild.id);
     const guildInvites = await guild.invites.fetch().catch(() => {});
     if (!guildInvites) return;
 
@@ -884,7 +1048,7 @@ client.once("ready", async () => {
   }, 10000);
 });
 
-// Cache invites when added to a new server
+// Cache invites & init config when added to a new server
 client.on("guildCreate", async (guild) => {
   getGuildConfig(guild.id);
   const guildInvites = await guild.invites.fetch().catch(() => {});
@@ -1042,6 +1206,100 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
+    /* --- STAFF ROLE MANAGEMENT (SERVER OWNER ONLY) --- */
+    if (commandName === "staff") {
+      if (!isServerOwner(interaction.user, interaction.guild)) {
+        return interaction.reply({
+          content: "❌ Only the **Server Owner** can assign or configure staff roles.",
+          ephemeral: true
+        });
+      }
+
+      const sub = interaction.options.getSubcommand();
+      const cfg = getGuildConfig(interaction.guildId);
+      const staffCfg = ensureStaffConfig(cfg);
+
+      if (sub === "add") {
+        const targetUser = interaction.options.getUser("user");
+        const roleKey = interaction.options.getString("role");
+        const meta = STAFF_ROLES_META[roleKey];
+
+        if (!Array.isArray(staffCfg.users[targetUser.id])) {
+          staffCfg.users[targetUser.id] = [];
+        }
+        if (!staffCfg.users[targetUser.id].includes(roleKey)) {
+          staffCfg.users[targetUser.id].push(roleKey);
+        }
+        saveServerConfigs();
+
+        return interaction.reply({
+          content: `✅ Assigned **${meta.label}** to ${targetUser} in **${interaction.guild.name}**.`,
+          ephemeral: true
+        });
+      }
+
+      if (sub === "remove") {
+        const targetUser = interaction.options.getUser("user");
+        const roleKey = interaction.options.getString("role");
+        const meta = STAFF_ROLES_META[roleKey];
+
+        if (Array.isArray(staffCfg.users[targetUser.id])) {
+          staffCfg.users[targetUser.id] = staffCfg.users[targetUser.id].filter(r => r !== roleKey);
+          if (staffCfg.users[targetUser.id].length === 0) {
+            delete staffCfg.users[targetUser.id];
+          }
+          saveServerConfigs();
+        }
+
+        return interaction.reply({
+          content: `🗑️ Removed **${meta.label}** from ${targetUser} in **${interaction.guild.name}**.`,
+          ephemeral: true
+        });
+      }
+
+      if (sub === "linkrole") {
+        const tier = interaction.options.getString("tier");
+        const discordRole = interaction.options.getRole("role");
+        const meta = STAFF_ROLES_META[tier];
+
+        staffCfg.roleLinks[tier] = discordRole ? discordRole.id : null;
+        saveServerConfigs();
+
+        return interaction.reply({
+          content: discordRole
+            ? `🔗 Linked Discord role ${discordRole} to **${meta.label}**.`
+            : `🔓 Unlinked Discord role for **${meta.label}**.`,
+          ephemeral: true
+        });
+      }
+
+      if (sub === "list") {
+        const entries = Object.entries(staffCfg.users);
+        const userLines = entries.length
+          ? entries.map(([uid, rKeys]) => {
+              const labels = rKeys.map(k => STAFF_ROLES_META[k]?.label || k).join(", ");
+              return `• <@${uid}> — **${labels}**`;
+            }).join("\n")
+          : "*No individual staff assignments set yet.*";
+
+        const linkLines = Object.entries(STAFF_ROLES_META).map(([k, meta]) => {
+          const rid = staffCfg.roleLinks[k];
+          return `• **${meta.label}:** ${rid ? `<@&${rid}>` : "*Not linked*"}`;
+        }).join("\n");
+
+        const embed = new EmbedBuilder()
+          .setColor(0x8600FF)
+          .setTitle(`🛡️ ${interaction.guild.name} • Staff Hierarchy`)
+          .addFields(
+            { name: "Assigned Staff Members", value: userLines, inline: false },
+            { name: "Linked Discord Roles", value: linkLines, inline: false }
+          )
+          .setTimestamp();
+
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+      }
+    }
+
     /* --- SETCHANNEL (ADMIN ONLY) --- */
     if (commandName === "setchannel") {
       if (!isGuildAdmin(member)) return noPerm();
@@ -1055,7 +1313,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: channel
-          ? `<a:verify_a:1508071382704193616> **${feature.toUpperCase()}** channel set to ${channel}.`
+          ? `✅ **${feature.toUpperCase()}** channel set to ${channel}.`
           : `🗑️ Cleared **${feature.toUpperCase()}** channel setting.`,
         ephemeral: true
       });
@@ -1074,7 +1332,7 @@ client.on("interactionCreate", async (interaction) => {
 
       const preview = formatTemplate(text, { member: interaction.member, guild: interaction.guild, level: 5 });
       return interaction.reply({
-        content: `<a:verify_a:1508071382704193616> Updated **${type}** message template!\n\n**Preview:**\n${preview}`,
+        content: `✅ Updated **${type}** message template!\n\n**Preview:**\n${preview}`,
         ephemeral: true
       });
     }
@@ -1098,7 +1356,7 @@ client.on("interactionCreate", async (interaction) => {
         badWordsDB[tier].push(word);
         fs.writeFileSync("./bad_words.json", JSON.stringify(badWordsDB, null, 2));
         return interaction.reply({
-          content: `<a:verify_a:1508071382704193616> Added \`${word}\` to **${tier.toUpperCase()}** AutoMod list.`,
+          content: `✅ Added \`${word}\` to **${tier.toUpperCase()}** AutoMod list.`,
           ephemeral: true
         });
       }
@@ -1156,20 +1414,22 @@ client.on("interactionCreate", async (interaction) => {
       saveLevels();
 
       return interaction.reply(
-        `<a:verify_a:1508071382704193616> ${target.tag} has been given **${amount} levels**! Now level **${levels[userId].level}**`
+        `✅ ${target.tag} has been given **${amount} levels**! Now level **${levels[userId].level}**`
       );
     }
 
-    /* --- BAN (ADMIN ONLY) --- */
+    /* --- BAN (SENIOR/JUNIOR ADMIN & OWNER/CEO) --- */
     if (commandName === "ban") {
-      if (!isGuildAdmin(member)) return noPerm();
+      if (!canBan(member)) return noPerm();
 
       const targetUser = interaction.options.getUser("user");
       const duration = interaction.options.getString("duration");
       const reason = interaction.options.getString("reason") || "No reason provided";
       const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
 
-      if (!targetMember) return interaction.reply({ content: "❌ Member not found in this server.", ephemeral: true });
+      if (targetMember && !canActOnTarget(member, targetMember)) {
+        return interaction.reply({ content: "❌ You cannot ban someone of equal or higher staff rank.", ephemeral: true });
+      }
 
       if (!bans[targetUser.id]) {
         bans[targetUser.id] = { history: [] };
@@ -1185,10 +1445,10 @@ client.on("interactionCreate", async (interaction) => {
         });
 
         saveBans();
-        await targetMember.ban({ reason });
+        await interaction.guild.members.ban(targetUser.id, { reason });
 
         return interaction.reply(
-          `<a:verify_a:1508071382704193616> ${targetUser.tag} permanently banned.\nReason: ${reason}`
+          `🔨 ${targetUser.tag} permanently banned.\nReason: ${reason}`
         );
       }
 
@@ -1205,10 +1465,10 @@ client.on("interactionCreate", async (interaction) => {
       });
 
       saveBans();
-      await targetMember.ban({ reason: `${reason} | Temp Ban` });
+      await interaction.guild.members.ban(targetUser.id, { reason: `${reason} | Temp Ban` });
 
       interaction.reply(
-        `<a:verify_a:1508071382704193616> ${targetUser.tag} banned for ${duration}`
+        `🔨 ${targetUser.tag} banned for ${duration}`
       );
 
       setTimeout(async () => {
@@ -1223,17 +1483,17 @@ client.on("interactionCreate", async (interaction) => {
           });
 
           saveBans();
-          interaction.channel.send(
-            `<a:verify_a:1508071382704193616> ${targetUser.tag}'s temporary ban expired.`
-          );
+          interaction.channel?.send(
+            `🔓 ${targetUser.tag}'s temporary ban expired.`
+          ).catch(() => {});
         } catch {}
       }, durationMs);
       return;
     }
 
-    /* --- UNBAN (ADMIN ONLY) --- */
+    /* --- UNBAN (SENIOR/JUNIOR ADMIN & OWNER/CEO) --- */
     if (commandName === "unban") {
-      if (!isGuildAdmin(member)) return noPerm();
+      if (!canBan(member)) return noPerm();
 
       const userId = interaction.options.getString("user_id");
 
@@ -1251,7 +1511,7 @@ client.on("interactionCreate", async (interaction) => {
         });
 
         saveBans();
-        return interaction.reply(`<a:verify_a:1508071382704193616> User ${userId} has been unbanned.`);
+        return interaction.reply(`🔓 User ${userId} has been unbanned.`);
       } catch {
         return interaction.reply({ content: "❌ Failed to unban user. Make sure the ID is valid.", ephemeral: true });
       }
@@ -1259,13 +1519,13 @@ client.on("interactionCreate", async (interaction) => {
 
     /* --- WARNLIST --- */
     if (commandName === "warnlist") {
-      if (!isStaff(member)) return noPerm();
+      if (!canWarn(member)) return noPerm();
 
       const target = interaction.options.getUser("user");
       const warns = warnings[target.id] || [];
 
       if (warns.length === 0) {
-        return interaction.reply(`<a:verify_a:1508071382704193616> ${target.tag} has no warnings.`);
+        return interaction.reply(`✅ ${target.tag} has no warnings.`);
       }
 
       const list = warns
@@ -1277,7 +1537,7 @@ client.on("interactionCreate", async (interaction) => {
 
       const embed = new EmbedBuilder()
         .setColor(0x8600FF)
-        .setTitle("<a:disclaimer_a:1507787788526026852> Warning History")
+        .setTitle("⚠️ Warning History")
         .setDescription(`👤 ${target.tag}\n\n${list}`)
         .setFooter({ text: `Total: ${warns.length}` })
         .setTimestamp();
@@ -1287,10 +1547,15 @@ client.on("interactionCreate", async (interaction) => {
 
     /* --- WARN --- */
     if (commandName === "warn") {
-      if (!isStaff(member)) return noPerm();
+      if (!canWarn(member)) return noPerm();
 
       const target = interaction.options.getUser("user");
       const reason = interaction.options.getString("reason") || "No reason provided";
+      const targetMember = await interaction.guild.members.fetch(target.id).catch(() => null);
+
+      if (targetMember && !canActOnTarget(member, targetMember)) {
+        return interaction.reply({ content: "❌ You cannot warn someone of equal or higher staff rank.", ephemeral: true });
+      }
 
       if (!warnings[target.id]) warnings[target.id] = [];
 
@@ -1301,13 +1566,13 @@ client.on("interactionCreate", async (interaction) => {
 
       saveWarnings();
       return interaction.reply(
-        `<a:disclaimer_a:1507787788526026852> ${target.tag} warned.\nReason: ${reason}`
+        `⚠️ ${target.tag} warned.\nReason: ${reason}`
       );
     }
 
     /* --- REMOVEWARN --- */
     if (commandName === "removewarn") {
-      if (!isStaff(member)) return noPerm();
+      if (!canWarn(member)) return noPerm();
 
       const target = interaction.options.getUser("user");
       const num = interaction.options.getInteger("number");
@@ -1322,32 +1587,32 @@ client.on("interactionCreate", async (interaction) => {
       saveWarnings();
 
       return interaction.reply(
-        `<a:verify_a:1508071382704193616> Removed warning #${num} from ${target.tag}`
+        `✅ Removed warning #${num} from ${target.tag}`
       );
     }
 
     /* --- CLEARWARN --- */
     if (commandName === "clearwarn") {
-      if (!isStaff(member)) return noPerm();
+      if (!canWarn(member)) return noPerm();
 
       const target = interaction.options.getUser("user");
       warnings[target.id] = [];
       saveWarnings();
 
       return interaction.reply(
-        `<a:verify_a:1508071382704193616> Cleared all warnings for ${target.tag}`
+        `✅ Cleared all warnings for ${target.tag}`
       );
     }
 
     /* --- MUTEHISTORY --- */
     if (commandName === "mutehistory") {
-      if (!isStaff(member)) return noPerm();
+      if (!canMute(member)) return noPerm();
 
       const target = interaction.options.getUser("user");
       const data = mutes[target.id];
 
       if (!data || !data.history.length) {
-        return interaction.reply(`<a:verify_a:1508071382704193616> ${target.tag} has no mute history.`);
+        return interaction.reply(`✅ ${target.tag} has no mute history.`);
       }
 
       const text = data.history
@@ -1368,13 +1633,17 @@ client.on("interactionCreate", async (interaction) => {
 
     /* --- MUTE --- */
     if (commandName === "mute") {
-      if (!isStaff(member)) return noPerm();
+      if (!canMute(member)) return noPerm();
 
       const targetUser = interaction.options.getUser("user");
       const reason = interaction.options.getString("reason") || "No reason provided";
       const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
 
       if (!targetMember) return interaction.reply({ content: "❌ Target member not found.", ephemeral: true });
+
+      if (!canActOnTarget(member, targetMember)) {
+        return interaction.reply({ content: "❌ You cannot mute someone of equal or higher staff rank.", ephemeral: true });
+      }
 
       await targetMember.timeout(28 * 24 * 60 * 60 * 1000, reason).catch(() => null);
 
@@ -1391,13 +1660,13 @@ client.on("interactionCreate", async (interaction) => {
 
       saveMutes();
       return interaction.reply(
-        `<a:verify_a:1508071382704193616> ${targetUser.tag} has been muted.\nReason: ${reason}`
+        `🔇 ${targetUser.tag} has been muted.\nReason: ${reason}`
       );
     }
 
     /* --- UNMUTE --- */
     if (commandName === "unmute") {
-      if (!isStaff(member)) return noPerm();
+      if (!canMute(member)) return noPerm();
 
       const targetUser = interaction.options.getUser("user");
       const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
@@ -1417,18 +1686,18 @@ client.on("interactionCreate", async (interaction) => {
       });
 
       saveMutes();
-      return interaction.reply(`<a:verify_a:1508071382704193616> ${targetUser.tag} has been unmuted.`);
+      return interaction.reply(`🔊 ${targetUser.tag} has been unmuted.`);
     }
 
     /* --- BANHISTORY --- */
     if (commandName === "banhistory") {
-      if (!isStaff(member)) return noPerm();
+      if (!canBan(member)) return noPerm();
 
       const target = interaction.options.getUser("user");
       const data = bans[target.id];
 
       if (!data || !data.history.length) {
-        return interaction.reply(`<a:verify_a:1508071382704193616> ${target.tag} has no ban history.`);
+        return interaction.reply(`✅ ${target.tag} has no ban history.`);
       }
 
       const text = data.history
@@ -1478,19 +1747,17 @@ client.on("interactionCreate", async (interaction) => {
             .setColor(0x8600FF)
             .setTitle("⚙️ Server Setup & AutoMod Commands")
             .setDescription(
+              "• **`/staff add | remove | linkrole | list`**\n" +
+              "  └ *(Server Owner)* Assign CEO, Senior Admin, Junior Admin, Manager, Senior Mod, Junior Mod, or Support Staff.\n\n" +
               "• **`/setchannel [feature] [channel]`**\n" +
               "  └ Set channels for Welcome, Goodbye, Boost, Level Up, Invite Log, Ticket Log, Join-to-Create VC, Audit Log, or Anti-Nuke Log.\n\n" +
               "• **`/setmessage [type] [message]`**\n" +
               "  └ Customize Welcome, Goodbye, or Boost text using `{user}`, `{username}`, `{server}`, `{memberCount}`.\n\n" +
-              "• **`/badword add [tier] [word]`**\n" +
-              "  └ Add a word/phrase to `warn`, `mute`, or `ban` AutoMod tiers.\n\n" +
-              "• **`/badword remove [tier] [word]`**\n" +
-              "  └ Remove a word/phrase from an AutoMod tier.\n\n" +
-              "• **`/badword list [tier]`**\n" +
-              "  └ Inspect configured AutoMod words."
+              "• **`/badword add | remove | list`**\n" +
+              "  └ Manage AutoMod words in `warn`, `mute`, or `ban` tiers."
             )
             .setImage(BANNER)
-            .setFooter({ text: "Category: Server Setup & AutoMod (Admin Only)" })
+            .setFooter({ text: "Category: Server Setup & AutoMod" })
             .setTimestamp();
         }
 
@@ -1571,7 +1838,7 @@ client.on("interactionCreate", async (interaction) => {
             "Select a module from the dropdown menu below to inspect commands, parameters, and usage.\n\n" +
             "**Directory Modules:**\n" +
             "• **🌐 General & Server** — Rules, guidelines, tickets, and terms\n" +
-            "• **⚙️ Server Setup & AutoMod** — Custom channels, messages, and bad-word filters\n" +
+            "• **⚙️ Server Setup & AutoMod** — Staff roles, channels, messages, and bad words\n" +
             "• **📊 Levels & Invites** — Level progress, invite tracking, AFK, and leaderboards\n" +
             "• **🎮 Mini-Games** — Snake, TicTacToe, Wordle, and Guess games\n" +
             "• **🛡️ Staff Operations** — Full moderation suite and giveaway system"
@@ -1587,7 +1854,7 @@ client.on("interactionCreate", async (interaction) => {
         .addOptions([
           { label: "Overview", description: "Main directory page", emoji: "📖", value: "overview" },
           { label: "General & Server Info", description: "Server rules, tickets, and guidelines", emoji: "🌐", value: "info" },
-          { label: "Server Setup & AutoMod", description: "Channels, custom messages, and bad words", emoji: "⚙️", value: "setup" },
+          { label: "Server Setup & AutoMod", description: "Staff roles, channels, messages, and bad words", emoji: "⚙️", value: "setup" },
           { label: "Levels & Invites", description: "Level cards, invite stats, and leaderboards", emoji: "📊", value: "stats" },
           { label: "Mini-Games & Fun", description: "Snake, TicTacToe, Wordle, and Guess", emoji: "🎮", value: "games" },
           { label: "Staff & Moderation", description: "Warns, mutes, bans, and giveaways", emoji: "🛡️", value: "mod" }
@@ -1669,22 +1936,22 @@ client.on("interactionCreate", async (interaction) => {
         .setThumbnail(targetUser.displayAvatarURL({ dynamic: true }))
         .setDescription(
           `👤 **User:** ${targetUser.tag}\n\n` +
-          `<a:verify_a:1508071382704193616> **Total Invites:** ${data.total}\n` +
-          `<:tik:1518250029695893525> **Current Invites:** ${data.current}\n` +
-          `<a:disclaimer_a:1507787788526026852> **Left Invites:** ${data.left}\n` +
-          `<:incorrect:1518250261502754989> **Fake Invites:** ${data.fake}\n\n` +
+          `✅ **Total Invites:** ${data.total}\n` +
+          `✨ **Current Invites:** ${data.current}\n` +
+          `⚠️ **Left Invites:** ${data.left}\n` +
+          `❌ **Fake Invites:** ${data.fake}\n\n` +
           `📜 **Total Joins Tracked:** ${totalHistory}`
         )
         .addFields(
           {
-            name: "<a:magic_book:1507790392945410299> Breakdown",
+            name: "📘 Breakdown",
             value:
-              `<:tik:1518250029695893525> Real Invites: ${data.current}\n` +
-              `<a:disclaimer_a:1507787788526026852> Fake Invites: ${data.fake}\n` +
-              `<:incorrect:1518250261502754989> Left Users: ${data.left}`
+              `✨ Real Invites: ${data.current}\n` +
+              `⚠️ Fake Invites: ${data.fake}\n` +
+              `❌ Left Users: ${data.left}`
           },
           {
-            name: "<:umm_really:1517961187998961806> Efficiency",
+            name: "📈 Efficiency",
             value:
               data.total > 0
                 ? `${Math.floor((data.current / data.total) * 100)}% Real Invites`
@@ -1707,10 +1974,10 @@ client.on("interactionCreate", async (interaction) => {
         .setThumbnail(targetUser.displayAvatarURL({ dynamic: true }))
         .setDescription(
           `👤 **User:** ${targetUser.tag}\n\n` +
-          `<a:verify_a:1508071382704193616> **Total Invites:** ${data.total}\n` +
-          `<:tik:1518250029695893525> **Current Invites:** ${data.current}\n` +
-          `<:incorrect:1518250261502754989> **Left Invites:** ${data.left}\n` +
-          `<a:disclaimer_a:1507787788526026852> **Fake Invites:** ${data.fake}`
+          `✅ **Total Invites:** ${data.total}\n` +
+          `✨ **Current Invites:** ${data.current}\n` +
+          `❌ **Left Invites:** ${data.left}\n` +
+          `⚠️ **Fake Invites:** ${data.fake}`
         )
         .setFooter({ text: "Use /invitedashboard for full stats view" })
         .setTimestamp();
@@ -1738,10 +2005,10 @@ client.on("interactionCreate", async (interaction) => {
         .setColor(0x8600FF)
         .setTitle(`🎉 ${interaction.guild.name.toUpperCase()} • GIVEAWAY 🎉`)
         .setDescription(
-          `<:money:1507752623971893470> **Prize:** ${prize}\n` +
-          `<a:twinkle_twinkle:1507788149030392000> **Hosted by:** ${interaction.user}\n` +
-          `<a:twinkle_twinkle:1507788149030392000> **Winners:** **${winnerCount}**\n` +
-          `<a:magic_book:1507790392945410299> **Ends:** <t:${endTimestamp}:R> (<t:${endTimestamp}:f>)\n\n` +
+          `🎁 **Prize:** ${prize}\n` +
+          `✨ **Hosted by:** ${interaction.user}\n` +
+          `👑 **Winners:** **${winnerCount}**\n` +
+          `⏳ **Ends:** <t:${endTimestamp}:R> (<t:${endTimestamp}:f>)\n\n` +
           `Click the **🎉 Enter** button below to participate!`
         )
         .setImage(BANNER)
@@ -1807,39 +2074,39 @@ client.on("interactionCreate", async (interaction) => {
     if (commandName === "rules") {
       const embed = new EmbedBuilder()
         .setColor(0x8600FF)
-        .setTitle(`<a:magic_book:1507790392945410299> ${interaction.guild.name} — Official Server Rules`)
+        .setTitle(`📘 ${interaction.guild.name} — Official Server Rules`)
         .setDescription(`
-# <a:magic_book:1507790392945410299> ${interaction.guild.name} — Official Server Rules
+# 📘 ${interaction.guild.name} — Official Server Rules
 
 ━━━━━━━━━━━━━━
 
-## <a:chats:1507788455558512691> **1. Chat Rules**
-<a:red_arrow:1507787736554410126> Keep the chat clean, friendly, and respectful. Toxicity, harassment, hate speech, discrimination, excessive swearing, spam, or inappropriate behavior is strictly prohibited.
+## 💬 **1. Chat Rules**
+➤ Keep the chat clean, friendly, and respectful. Toxicity, harassment, hate speech, discrimination, excessive swearing, spam, or inappropriate behavior is strictly prohibited.
 
 ━━━━━━━━━━━━━━
 
-## <a:announcement_a:1507790462210281482> **2. Proper Channel Usage**
-<a:red_arrow:1507787736554410126> Use channels correctly and avoid unnecessary spam, advertising, or disruptive behavior. Keep conversations meaningful and respectful.
+## 📢 **2. Proper Channel Usage**
+➤ Use channels correctly and avoid unnecessary spam, advertising, or disruptive behavior. Keep conversations meaningful and respectful.
 
 ━━━━━━━━━━━━━━
 
-## <a:disclaimer_a:1507787788526026852> **3. Follow Discord Guidelines**
-<a:red_arrow:1507787736554410126> All members must follow the official Discord Community Guidelines and Terms of Service at all times.
+## ⚠️ **3. Follow Discord Guidelines**
+➤ All members must follow the official Discord Community Guidelines and Terms of Service at all times.
 
 ━━━━━━━━━━━━━━
 
-## <a:announcement_a:1507790462210281482> **4. Voice Chat Rules**
-<a:red_arrow:1507787736554410126> Keep VC conversations friendly and appropriate. Mic spam, earrape, excessive background noise, harassment, or disturbing others is not allowed.
+## 🔊 **4. Voice Chat Rules**
+➤ Keep VC conversations friendly and appropriate. Mic spam, earrape, excessive background noise, harassment, or disturbing others is not allowed.
 
 ━━━━━━━━━━━━━━
 
-## <a:disclaimer_a:1507787788526026852> **5. Punishment System**
-<a:red_arrow:1507787736554410126> Warning → Mute → Kick → Temporary Ban → Permanent Ban
+## ⚖️ **5. Punishment System**
+➤ Warning → Mute → Kick → Temporary Ban → Permanent Ban
 
 ━━━━━━━━━━━━━━
 
-## <a:announcement_a:1507790462210281482> **6. Use Common Sense**
-<a:red_arrow:1507787736554410126> Not every situation can be covered by rules. Use common sense and respect staff decisions to help maintain a positive and fair community.
+## 💡 **6. Use Common Sense**
+➤ Not every situation can be covered by rules. Use common sense and respect staff decisions to help maintain a positive and fair community.
 `)
         .setThumbnail(interaction.guild.iconURL() || THUMBNAIL)
         .setImage(BANNER)
@@ -1856,34 +2123,34 @@ client.on("interactionCreate", async (interaction) => {
         .setTitle(`⚖️ ${interaction.guild.name} • Punishment System`)
         .setDescription(`
 ━━━━━━━━━━━━━━━━━━━━━━━━
-# **<a:announcement_a:1507790462210281482> Punishment System**
+# **📢 Punishment System**
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
-<a:red_arrow:1507787736554410126> Most violations will result in a Warning first.
+➤ Most violations will result in a Warning first.
 
-<a:red_arrow:1507787736554410126> Repeated violations may result in Mutes, Temporary Bans, or Permanent Bans.
+➤ Repeated violations may result in Mutes, Temporary Bans, or Permanent Bans.
 
 ━━━━━━━━━━━━━━
 
-<a:red_arrow:1507787736554410126> Chat Spam & Advertising
+➤ Chat Spam & Advertising
 Warning → Mute → Temporary Ban
 
-<a:red_arrow:1507787736554410126> Harassment, Toxicity & Hate Speech
+➤ Harassment, Toxicity & Hate Speech
 Warning → Mute → Temporary Ban → Permanent Ban
 
-<a:red_arrow:1507787736554410126> Staff Impersonation
+➤ Staff Impersonation
 Warning → Temporary Ban → Permanent Ban
 
-<a:red_arrow:1507787736554410126> Ban Evasion
+➤ Ban Evasion
 Permanent Ban
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
-# **<a:disclaimer_a:1507787788526026852> Final Notice**
+# **⚠️ Final Notice**
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
-<a:arrow:1507782135212150845> Staff may issue harsher punishments immediately for severe offenses.
+➤ Staff may issue harsher punishments immediately for severe offenses.
 
-<a:arrow:1507782135212150845> Use common sense and respect staff decisions. Staff decisions are final.
+➤ Use common sense and respect staff decisions. Staff decisions are final.
 `)
         .setImage(BANNER)
         .setFooter({ text: `${interaction.guild.name} Guidelines` })
@@ -1899,14 +2166,14 @@ Permanent Ban
         .setTitle(`📋 ${interaction.guild.name} • Terms & Conditions`)
         .setDescription(`
 ━━━━━━━━━━━━━━━━━━━━━━
-**<a:announcement_a:1507790462210281482> Community Policy**
+**📢 Community Policy**
 ━━━━━━━━━━━━━━━━━━━━━━
 
-<a:red_arrow:1507787736554410126> By participating in **${interaction.guild.name}**, you agree to follow all server rules and Discord's official Terms of Service.
+➤ By participating in **${interaction.guild.name}**, you agree to follow all server rules and Discord's official Terms of Service.
 
-<a:red_arrow:1507787736554410126> Members are responsible for the security of their own Discord accounts.
+➤ Members are responsible for the security of their own Discord accounts.
 
-<a:red_arrow:1507787736554410126> Moderation actions are enforced based on evidence and severity at staff discretion.
+➤ Moderation actions are enforced based on evidence and severity at staff discretion.
 `)
         .setImage(BANNER)
         .setFooter({ text: `${interaction.guild.name} Terms` })
@@ -1947,8 +2214,8 @@ Permanent Ban
         .setDescription(
           "Select a ticket type from the dropdown menu below.\n\n" +
           "❓ General Support\n" +
-          "<a:disclaimer_a:1507787788526026852> Player / Member Reports\n" +
-          "<a:disclaimer_a:1507787788526026852> Punishment Appeals"
+          "⚠️ Member Reports\n" +
+          "⚖️ Punishment Appeals"
         )
         .setImage(BANNER)
         .setThumbnail(interaction.guild.iconURL() || THUMBNAIL)
@@ -1967,13 +2234,13 @@ Permanent Ban
           {
             label: "Member Report",
             description: "Report a rule violator",
-            emoji: "<a:disclaimer_a:1507787788526026852>",
+            emoji: "⚠️",
             value: "report"
           },
           {
             label: "Punishment Appeal",
             description: "Appeal your punishment",
-            emoji: "<a:disclaimer_a:1507787788526026852>",
+            emoji: "⚖️",
             value: "appeal"
           }
         ]);
@@ -1995,7 +2262,7 @@ Permanent Ban
       } else {
         player2 = interaction.options.getUser("opponent");
         if (!player2 || player2.bot || player2.id === player1.id) {
-          return interaction.reply({ content: "<:incorrect:1518250261502754989> Please mention a valid player to challenge!", ephemeral: true });
+          return interaction.reply({ content: "❌ Please mention a valid player to challenge!", ephemeral: true });
         }
       }
 
@@ -2109,7 +2376,7 @@ Permanent Ban
 
       collector.on("collect", async (i) => {
         if (i.user.id !== turn) {
-          return i.reply({ content: "<:incorrect:1518250261502754989> It is not your turn!", ephemeral: true });
+          return i.reply({ content: "❌ It is not your turn!", ephemeral: true });
         }
 
         const index = parseInt(i.customId.split("_")[1]);
@@ -2154,13 +2421,13 @@ Permanent Ban
         });
 
         if (reason === "❌") {
-          await gameMessage.edit({ content: `<a:twinkle_twinkle:1507788149030392000> **Game Over!** ${player1} (X) won the match!`, components: disabledRows }).catch(() => {});
+          await gameMessage.edit({ content: `🎉 **Game Over!** ${player1} (X) won the match!`, components: disabledRows }).catch(() => {});
         } else if (reason === "⭕") {
-          await gameMessage.edit({ content: `<a:twinkle_twinkle:1507788149030392000> **Game Over!** ${isBotGame ? player2.username : player2} (O) won the match!`, components: disabledRows }).catch(() => {});
+          await gameMessage.edit({ content: `🎉 **Game Over!** ${isBotGame ? player2.username : player2} (O) won the match!`, components: disabledRows }).catch(() => {});
         } else if (reason === "tie") {
-          await gameMessage.edit({ content: `<:yummm:1509900502924529684> **Game Over!** It's a tie match!`, components: disabledRows }).catch(() => {});
+          await gameMessage.edit({ content: `🤝 **Game Over!** It's a tie match!`, components: disabledRows }).catch(() => {});
         } else {
-          await gameMessage.edit({ content: `<a:disclaimer_a:1507787788526026852> **Game Over!** Game timed out because a player took longer than 15 minutes to move.`, components: disabledRows }).catch(() => {});
+          await gameMessage.edit({ content: `⚠️ **Game Over!** Game timed out because a player took longer than 15 minutes to move.`, components: disabledRows }).catch(() => {});
         }
       });
       return;
@@ -2176,7 +2443,7 @@ Permanent Ban
 
       const startEmbed = new EmbedBuilder()
         .setColor(0x8600FF)
-        .setTitle("<a:magic_book:1507790392945410299> Wordle Game Initialized!")
+        .setTitle("📝 Wordle Game Initialized!")
         .setDescription(`I've picked a secret **5-letter word**. You have **6 tries** to guess it right!\n\n⏳ You have **15 minutes** to submit each guess. Type your 5-letter words below!`)
         .setFooter({ text: `Requested by ${interaction.user.username}` })
         .setTimestamp();
@@ -2192,7 +2459,7 @@ Permanent Ban
         const guess = m.content.toLowerCase().trim();
 
         if (guess.length !== 5) {
-          return m.reply("<a:disclaimer_a:1507787788526026852> Your guess must be exactly **5 letters** long!").then(msg => setTimeout(() => msg.delete().catch(() => {}), 3000));
+          return m.reply("⚠️ Your guess must be exactly **5 letters** long!").then(msg => setTimeout(() => msg.delete().catch(() => {}), 3000));
         }
 
         attempts++;
@@ -2218,7 +2485,7 @@ Permanent Ban
 
         const statusEmbed = new EmbedBuilder()
           .setColor(0x8600FF)
-          .setTitle("<a:magic_book:1507790392945410299> Wordle Tracker")
+          .setTitle("📝 Wordle Tracker")
           .setDescription(gameBoard.join("\n") + "\n\n⏳ *Timer reset! 15 minutes left for your next guess.*")
           .setFooter({ text: `Attempt ${attempts}/${maxAttempts}` })
           .setTimestamp();
@@ -2234,11 +2501,11 @@ Permanent Ban
 
       collector.on("end", async (collected, reason) => {
         if (reason === "win") {
-          interaction.channel.send(`<a:twinkle_twinkle:1507788149030392000> Congratulations ${interaction.user}! You guessed the correct word **${targetWord.toUpperCase()}** in ${attempts} tries!`);
+          interaction.channel.send(`🎉 Congratulations ${interaction.user}! You guessed the correct word **${targetWord.toUpperCase()}** in ${attempts} tries!`);
         } else if (reason === "lose") {
-          interaction.channel.send(`<:incorrect:1518250261502754989> Game Over ${interaction.user}! You've run out of tries. The secret word was **${targetWord.toUpperCase()}**.`);
+          interaction.channel.send(`❌ Game Over ${interaction.user}! You've run out of tries. The secret word was **${targetWord.toUpperCase()}**.`);
         } else {
-          interaction.channel.send(`<a:disclaimer_a:1507787788526026852> ${interaction.user}, your Wordle session timed out because you took longer than 15 minutes to guess.`);
+          interaction.channel.send(`⚠️ ${interaction.user}, your Wordle session timed out because you took longer than 15 minutes to guess.`);
         }
       });
       return;
@@ -2251,7 +2518,7 @@ Permanent Ban
 
       const startEmbed = new EmbedBuilder()
         .setColor(0x8600FF)
-        .setTitle("<a:arrow:1507782135212150845> Guess the Number!")
+        .setTitle("🔢 Guess the Number!")
         .setDescription("I have chosen a secret number between **1 and 10000**.\n\nType your guesses directly into this channel. You have **15 minutes** to submit each guess!")
         .setFooter({ text: `Player: ${interaction.user.username}` })
         .setTimestamp();
@@ -2273,17 +2540,17 @@ Permanent Ban
         if (guess === targetNumber) {
           collector.stop("win");
         } else if (guess > targetNumber) {
-          await m.reply(`<a:red_arrow:1507787736554410126> **${guess}** is **too high**! Try a lower number. *(Attempt: ${attempts})*`).catch(() => {});
+          await m.reply(`🔻 **${guess}** is **too high**! Try a lower number. *(Attempt: ${attempts})*`).catch(() => {});
         } else {
-          await m.reply(`<a:red_arrow:1507787736554410126> **${guess}** is **too low**! Try a higher number. *(Attempt: ${attempts})*`).catch(() => {});
+          await m.reply(`🔺 **${guess}** is **too low**! Try a higher number. *(Attempt: ${attempts})*`).catch(() => {});
         }
       });
 
       collector.on("end", async (collected, reason) => {
         if (reason === "win") {
-          interaction.channel.send(`<a:twinkle_twinkle:1507788149030392000> **Congratulations ${interaction.user}!** You guessed the correct number **${targetNumber}** in **${attempts}** attempts!`);
+          interaction.channel.send(`🎉 **Congratulations ${interaction.user}!** You guessed the correct number **${targetNumber}** in **${attempts}** attempts!`);
         } else {
-          interaction.channel.send(`<a:disclaimer_a:1507787788526026852> ${interaction.user}, your Guess the Number session timed out because you took longer than 15 minutes. The secret number was **${targetNumber}**.`);
+          interaction.channel.send(`⚠️ ${interaction.user}, your Guess the Number session timed out because you took longer than 15 minutes. The secret number was **${targetNumber}**.`);
         }
       });
       return;
@@ -2418,8 +2685,8 @@ Permanent Ban
 
         const finalEmbed = new EmbedBuilder()
           .setColor(reason === "win" ? 0x57F287 : 0xED4245)
-          .setTitle(reason === "win" ? "<a:crown_a:1507791684208033842> Flawless Victory!" : "<:blue_shit:1508551560945209415> Game Over!")
-          .addFields({ name: "<a:magic_book:1507790392945410299> Final Score", value: `**${score}** points`, inline: true })
+          .setTitle(reason === "win" ? "👑 Flawless Victory!" : "💀 Game Over!")
+          .addFields({ name: "📘 Final Score", value: `**${score}** points`, inline: true })
           .setTimestamp();
 
         if (reason === "dead") {
@@ -2631,7 +2898,7 @@ Permanent Ban
         });
       }
 
-      if (currentOwnerId !== interaction.user.id && !interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      if (currentOwnerId !== interaction.user.id && !isGuildAdmin(interaction.member)) {
         return interaction.reply({
           content: "❌ Only the channel owner can modify channel settings and permissions!",
           flags: MessageFlags.Ephemeral
@@ -2768,6 +3035,8 @@ Permanent Ban
     /* --- 2. SELECT MENU TICKETS --- */
     if (interaction.customId === "ticket_menu") {
       const type = interaction.values[0];
+      const cfg = getGuildConfig(interaction.guild.id);
+      const staffCfg = ensureStaffConfig(cfg);
 
       const permissionOverwrites = [
         {
@@ -2793,11 +3062,27 @@ Permanent Ban
         }
       ];
 
-      for (const id of STAFF_USER_IDS) {
-        const target = interaction.guild.roles.cache.get(id) || interaction.guild.members.cache.get(id);
-        if (target) {
+      const staffIds = new Set(Object.keys(staffCfg.users || {}));
+      if (interaction.guild.ownerId) staffIds.add(interaction.guild.ownerId);
+
+      for (const uid of staffIds) {
+        if (interaction.guild.members.cache.has(uid)) {
           permissionOverwrites.push({
-            id: target.id,
+            id: uid,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages,
+              PermissionsBitField.Flags.ReadMessageHistory,
+              PermissionsBitField.Flags.AttachFiles
+            ]
+          });
+        }
+      }
+
+      for (const rid of Object.values(staffCfg.roleLinks || {})) {
+        if (rid && interaction.guild.roles.cache.has(rid)) {
+          permissionOverwrites.push({
+            id: rid,
             allow: [
               PermissionsBitField.Flags.ViewChannel,
               PermissionsBitField.Flags.SendMessages,
@@ -2847,7 +3132,7 @@ Permanent Ban
       });
 
       return interaction.reply({
-        content: `<a:verify_a:1508071382704193616> Ticket created: ${channel}`,
+        content: `✅ Ticket created: ${channel}`,
         ephemeral: true
       });
     }
@@ -2947,7 +3232,7 @@ Permanent Ban
 
     /* --- CLAIM TICKET (STAFF ONLY) --- */
     if (interaction.customId === "claim_ticket") {
-      if (!isStaff(interaction.member)) {
+      if (!canManageTickets(interaction.member)) {
         return interaction.reply({ content: "❌ Only server staff can claim tickets!", ephemeral: true });
       }
 
@@ -3373,10 +3658,10 @@ Permanent Ban
       const userId = interaction.user.id;
       if (gw.entries.includes(userId)) {
         gw.entries = gw.entries.filter((id) => id !== userId);
-        await interaction.reply({ content: "<:incorrect:1518250261502754989> You left the giveaway.", ephemeral: true });
+        await interaction.reply({ content: "❌ You left the giveaway.", ephemeral: true });
       } else {
         gw.entries.push(userId);
-        await interaction.reply({ content: "<:tik:1518250029695893525> You entered the giveaway! Good luck!", ephemeral: true });
+        await interaction.reply({ content: "✅ You entered the giveaway! Good luck!", ephemeral: true });
       }
 
       saveGiveaways();
@@ -3455,7 +3740,7 @@ client.on("guildMemberAdd", async (member) => {
       if (logChannel) {
         const inviterUser = client.users.cache.get(inviterId) || `<@${inviterId}>`;
         logChannel.send(
-          `👤 ${inviterUser} invited **${member.user.tag}** (${member}) to the server and now has **${data.current}** invite(s)! ${isFake ? "<a:disclaimer_a:1507787788526026852> *(Suspected Fake Account)*" : ""}`
+          `👤 ${inviterUser} invited **${member.user.tag}** (${member}) to the server and now has **${data.current}** invite(s)! ${isFake ? "⚠️ *(Suspected Fake Account)*" : ""}`
         ).catch(console.error);
       }
 
@@ -3529,7 +3814,7 @@ client.on("guildMemberRemove", async (member) => {
         if (logChannel) {
           const username = member.user?.tag || member.displayName || "An unknown user";
           logChannel.send(
-            `<:incorrect:1518250261502754989> **${username}** left the server. They were invited by <@${inviterId}>, whose remaining invite count is now **${data.current}**.`
+            `❌ **${username}** left the server. They were invited by <@${inviterId}>, whose remaining invite count is now **${data.current}**.`
           ).catch(console.error);
         }
 
