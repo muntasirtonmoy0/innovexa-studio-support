@@ -936,6 +936,24 @@ const commands = [
         )
     ),
 
+new SlashCommandBuilder()
+    .setName("elevate")
+    .setDescription("Escalate the current ticket to the Server Owner or CEO")
+    .addStringOption(o =>
+      o.setName("target")
+        .setDescription("Who to escalate this ticket to")
+        .setRequired(true)
+        .addChoices(
+          { name: "Owner", value: "owner" },
+          { name: "CEO / Chief", value: "ceo" }
+        )
+    )
+    .addStringOption(o =>
+      o.setName("reason")
+        .setDescription("Reason (e.g., payment/cash matter or cannot assist further)")
+        .setRequired(false)
+    ),
+   
   new SlashCommandBuilder()
     .setName("leaderboard")
     .setDescription("View server rankings for Levels, Daily Chat, and Invites")
