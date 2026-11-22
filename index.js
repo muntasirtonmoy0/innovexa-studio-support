@@ -309,6 +309,52 @@ function canActOnTarget(actor, targetMember) {
   return actorRank < targetRank;
 }
 
+/* =========================================================
+   TICKET CLAIM LOCK & ELEVATION HELPERS
+========================================================= */
+function parseTicketTopic(topic = "") {
+  const openerMatch = topic.match(/Ticket Opener:\s*(\d+)/);
+  const claimedByMatch = topic.match(/ClaimedBy:\s*(\d+)/);
+  const statusMatch = topic.match(/Status:\s*([^|]+)/);
+  return {
+    openerId: openerMatch ? openerMatch[1] : null,
+    claimedById: claimedByMatch ? claimedByMatch[1] : null,
+    status: statusMatch ? statusMatch[1].trim() : "Unclaimed"
+  };
+}
+
+function buildTicketTopic({ openerId, claimedById, status }) {
+  const parts = [];
+  if (openerId) parts.push(`Ticket Opener: ${openerId}`);
+  if (claimedById) parts.push(`ClaimedBy: ${claimedById}`);
+  parts.push(`Status: ${status}`);
+  return parts.join(" | ");
+}
+
+function isTicketChannel(channel) {
+  return Boolean(channel && channel.type === ChannelType.GuildText && channel.topic && channel.topic.includes("Ticket Opener:"));
+}
+
+function getServerCeoTargets(guild) {
+  if (!guild) return { userIds: [], roleIds: [] };
+  const cfg = getGuildConfig(guild.id);
+  const staffCfg = ensureStaffConfig(cfg);
+  const userIds = [];
+
+  for (const [uid, roles] of Object.entries(staffCfg.users || {})) {
+    if (Array.isArray(roles) && roles.includes("ceo")) {
+      userIds.push(uid);
+    }
+  }
+
+  const roleIds = [];
+  if (staffCfg.roleLinks?.ceo) {
+    roleIds.push(staffCfg.roleLinks.ceo);
+  }
+
+  return { userIds, roleIds };
+}
+
 /* =========================
    TIERED AUTOMOD LOADER
 ========================= */
@@ -676,6 +722,24 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("elevate")
+    .setDescription("Escalate the current ticket to the Server Owner or CEO")
+    .addStringOption(o =>
+      o.setName("target")
+        .setDescription("Who to escalate this ticket to")
+        .setRequired(true)
+        .addChoices(
+          { name: "Owner", value: "owner" },
+          { name: "CEO / Chief", value: "ceo" }
+        )
+    )
+    .addStringOption(o =>
+      o.setName("reason")
+        .setDescription("Reason (e.g., payment/cash matter or cannot assist further)")
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
     .setName("setchannel")
     .setDescription("Set a channel for a specific bot feature (Admin Only)")
     .addStringOption(o =>
@@ -936,24 +1000,6 @@ const commands = [
         )
     ),
 
-new SlashCommandBuilder()
-    .setName("elevate")
-    .setDescription("Escalate the current ticket to the Server Owner or CEO")
-    .addStringOption(o =>
-      o.setName("target")
-        .setDescription("Who to escalate this ticket to")
-        .setRequired(true)
-        .addChoices(
-          { name: "Owner", value: "owner" },
-          { name: "CEO / Chief", value: "ceo" }
-        )
-    )
-    .addStringOption(o =>
-      o.setName("reason")
-        .setDescription("Reason (e.g., payment/cash matter or cannot assist further)")
-        .setRequired(false)
-    ),
-   
   new SlashCommandBuilder()
     .setName("leaderboard")
     .setDescription("View server rankings for Levels, Daily Chat, and Invites")
@@ -1078,7 +1124,7 @@ client.on("guildCreate", async (guild) => {
 });
 
 /* =========================
-   PASSIVE XP & TIERED AUTOMOD
+   PASSIVE XP, CLAIM LOCK & TIERED AUTOMOD
 ========================= */
 client.on("messageCreate", async (message) => {
   if (!message.guild || message.author.bot) return;
@@ -1086,6 +1132,23 @@ client.on("messageCreate", async (message) => {
   const member = message.member || await message.guild.members.fetch(message.author.id).catch(() => null);
   const bypass = isStaff(member);
   const cfg = getGuildConfig(message.guild.id);
+
+  /* --- TICKET CLAIM LOCK: ONLY CLAIMANT OR SERVER OWNER CAN INTERVENE --- */
+  if (isTicketChannel(message.channel)) {
+    const info = parseTicketTopic(message.channel.topic);
+    const ownerCheck = isServerOwner(message.author, message.guild);
+
+    if (info.claimedById && message.author.id !== info.claimedById && message.author.id !== info.openerId && !ownerCheck) {
+      if (member && canManageTickets(member)) {
+        await message.delete().catch(() => {});
+        const warnNotice = await message.channel.send({
+          content: `🔒 ${message.author}, this ticket is claimed by <@${info.claimedById}>. Only the claiming staff member or the **Server Owner** can intervene here.`
+        }).catch(() => {});
+        if (warnNotice) setTimeout(() => warnNotice.delete().catch(() => {}), 5000);
+        return;
+      }
+    }
+  }
 
   /* --- 1. TRACK MESSAGE STATS --- */
   trackUserMessage(message.author.id);
@@ -1318,6 +1381,91 @@ client.on("interactionCreate", async (interaction) => {
       }
     }
 
+    /* --- ELEVATE TICKET TO OWNER OR CEO --- */
+    if (commandName === "elevate") {
+      if (!isTicketChannel(interaction.channel)) {
+        return interaction.reply({
+          content: "❌ This command can only be used inside a ticket channel.",
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      const info = parseTicketTopic(interaction.channel.topic);
+      const ownerCheck = isServerOwner(interaction.user, interaction.guild);
+      const isClaimer = info.claimedById === interaction.user.id;
+
+      if (!ownerCheck && !isClaimer) {
+        return interaction.reply({
+          content: info.claimedById
+            ? `❌ Only the staff member who claimed this ticket (<@${info.claimedById}>) or the **Server Owner** can elevate it.`
+            : "❌ Claim this ticket first before elevating it.",
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      const target = interaction.options.getString("target");
+      const reason = interaction.options.getString("reason") || "Payment / cash matter or further assistance required";
+
+      const ceoInfo = getServerCeoTargets(interaction.guild);
+      const mentions = [];
+
+      if (target === "owner") {
+        mentions.push(`<@${interaction.guild.ownerId}>`);
+      } else if (target === "ceo") {
+        for (const uid of ceoInfo.userIds) mentions.push(`<@${uid}>`);
+        for (const rid of ceoInfo.roleIds) mentions.push(`<@&${rid}>`);
+        if (mentions.length === 0) mentions.push(`<@${interaction.guild.ownerId}>`);
+      }
+
+      if (target === "ceo") {
+        for (const uid of ceoInfo.userIds) {
+          await interaction.channel.permissionOverwrites.edit(uid, {
+            ViewChannel: true,
+            SendMessages: true,
+            ReadMessageHistory: true,
+            AttachFiles: true
+          }).catch(() => {});
+        }
+        for (const rid of ceoInfo.roleIds) {
+          await interaction.channel.permissionOverwrites.edit(rid, {
+            ViewChannel: true,
+            SendMessages: true,
+            ReadMessageHistory: true,
+            AttachFiles: true
+          }).catch(() => {});
+        }
+      }
+
+      const newStatus = target === "owner" ? "Escalated to Owner" : "Escalated to CEO";
+      await interaction.channel.setTopic(
+        buildTicketTopic({
+          openerId: info.openerId,
+          claimedById: info.claimedById,
+          status: newStatus
+        })
+      ).catch(() => {});
+
+      const elevateEmbed = new EmbedBuilder()
+        .setColor(0xF59E0B)
+        .setTitle(`📣 Ticket Elevated to ${target === "owner" ? "Server Owner" : "CEO / Chief"}`)
+        .setDescription(
+          `**Elevated By:** ${interaction.user}\n` +
+          `**Escalated To:** ${mentions.join(", ")}\n` +
+          `**Reason:** ${reason}`
+        )
+        .setTimestamp();
+
+      await interaction.channel.send({
+        content: `🔔 Attention ${mentions.join(" ")} — this ticket has been escalated!`,
+        embeds: [elevateEmbed]
+      });
+
+      return interaction.reply({
+        content: `✅ Ticket elevated to **${target === "owner" ? "Owner" : "CEO"}**.`,
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
     /* --- SETCHANNEL (ADMIN ONLY) --- */
     if (commandName === "setchannel") {
       if (!isGuildAdmin(member)) return noPerm();
@@ -1436,7 +1584,7 @@ client.on("interactionCreate", async (interaction) => {
       );
     }
 
-    /* --- BAN (SENIOR/JUNIOR ADMIN & OWNER/CEO) --- */
+    /* --- BAN (ADMIN ONLY) --- */
     if (commandName === "ban") {
       if (!canBan(member)) return noPerm();
 
@@ -1509,7 +1657,7 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    /* --- UNBAN (SENIOR/JUNIOR ADMIN & OWNER/CEO) --- */
+    /* --- UNBAN (ADMIN ONLY) --- */
     if (commandName === "unban") {
       if (!canBan(member)) return noPerm();
 
@@ -1752,6 +1900,8 @@ client.on("interactionCreate", async (interaction) => {
               "  └ Read community terms and conditions.\n\n" +
               "• **`/panel`**\n" +
               "  └ Deploy the interactive support ticket dropdown panel.\n\n" +
+              "• **`/elevate [target] [reason]`**\n" +
+              "  └ Escalate a claimed ticket to the Server Owner or CEO.\n\n" +
               "• **`/help [category]`**\n" +
               "  └ Open this interactive command directory."
             )
@@ -3114,7 +3264,11 @@ Permanent Ban
       const channel = await interaction.guild.channels.create({
         name: `${type}-${interaction.user.username}`,
         type: ChannelType.GuildText,
-        topic: `Ticket Opener: ${interaction.user.id} | Status: Unclaimed`,
+        topic: buildTicketTopic({
+          openerId: interaction.user.id,
+          claimedById: null,
+          status: "Unclaimed"
+        }),
         permissionOverwrites
       });
 
@@ -3248,18 +3402,62 @@ Permanent Ban
   ========================= */
   if (interaction.isButton()) {
 
-    /* --- CLAIM TICKET (STAFF ONLY) --- */
+    /* --- CLAIM TICKET (OPEN TO ANY STAFF, LOCKED TO OTHERS AFTER CLAIM EXCEPT OWNER) --- */
     if (interaction.customId === "claim_ticket") {
       if (!canManageTickets(interaction.member)) {
         return interaction.reply({ content: "❌ Only server staff can claim tickets!", ephemeral: true });
       }
 
-      if (interaction.channel.topic?.includes("Status: Claimed")) {
-        return interaction.reply({ content: "⚠️ This ticket has already been claimed!", ephemeral: true });
+      const info = parseTicketTopic(interaction.channel.topic);
+      const ownerCheck = isServerOwner(interaction.user, interaction.guild);
+
+      if (info.claimedById && info.claimedById !== interaction.user.id && !ownerCheck) {
+        return interaction.reply({
+          content: `🔒 This ticket is already claimed by <@${info.claimedById}>. Only they or the **Server Owner** can intervene.`,
+          ephemeral: true
+        });
       }
 
-      const originalTopic = interaction.channel.topic || "";
-      await interaction.channel.setTopic(`${originalTopic.replace("Status: Unclaimed", "")} | Status: Claimed by ${interaction.user.tag}`);
+      if (info.claimedById === interaction.user.id) {
+        return interaction.reply({
+          content: "⚠️ You have already claimed this ticket!",
+          ephemeral: true
+        });
+      }
+
+      await interaction.channel.setTopic(
+        buildTicketTopic({
+          openerId: info.openerId,
+          claimedById: interaction.user.id,
+          status: `Claimed by ${interaction.user.tag}`
+        })
+      ).catch(() => {});
+
+      const cfg = getGuildConfig(interaction.guild.id);
+      const staffCfg = ensureStaffConfig(cfg);
+
+      for (const uid of Object.keys(staffCfg.users || {})) {
+        if (uid !== interaction.user.id && uid !== info.openerId && uid !== interaction.guild.ownerId) {
+          await interaction.channel.permissionOverwrites.edit(uid, {
+            SendMessages: false
+          }).catch(() => {});
+        }
+      }
+
+      for (const rid of Object.values(staffCfg.roleLinks || {})) {
+        if (rid && interaction.guild.roles.cache.has(rid)) {
+          await interaction.channel.permissionOverwrites.edit(rid, {
+            SendMessages: false
+          }).catch(() => {});
+        }
+      }
+
+      await interaction.channel.permissionOverwrites.edit(interaction.user.id, {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+        AttachFiles: true
+      }).catch(() => {});
 
       const claimButton = new ButtonBuilder()
         .setCustomId("claimed_btn")
@@ -3278,7 +3476,7 @@ Permanent Ban
       await interaction.update({ components: [updatedRow] }).catch(() => {});
 
       return interaction.channel.send({
-        content: `📌 **Ticket Claimed!** ${interaction.user} is now handling this ticket.`
+        content: `📌 **Ticket Claimed!** ${interaction.user} is now handling this ticket. Other staff are locked out unless elevated or intervened by the **Server Owner**. Use \`/elevate\` to escalate to **Owner** or **CEO**.`
       });
     }
 
@@ -3296,8 +3494,8 @@ Permanent Ban
       const ticketClosedAt = new Date();
       const ticketId = interaction.channel.name.match(/\d+/)?.[0] || interaction.channel.id.slice(-4);
 
-      const openerMatch = interaction.channel.topic?.match(/Ticket Opener: (\d+)/);
-      const openerId = openerMatch ? openerMatch[1] : interaction.user.id;
+      const info = parseTicketTopic(interaction.channel.topic);
+      const openerId = info.openerId || interaction.user.id;
       const openerUser = await client.users.fetch(openerId).catch(() => interaction.user);
 
       function escapeHtml(text) {
