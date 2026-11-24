@@ -81,6 +81,7 @@ const {
 
 const fs = require("fs");
 const ms = require("ms");
+const crypto = require("crypto");
 
 /* =========================
    IMAGES
@@ -132,7 +133,7 @@ function loadJSON(filePath, defaultData) {
 }
 
 /* =========================================================
-   PER-SERVER CONFIGS (CHANNELS, CUSTOM MESSAGES & STAFF)
+   PER-SERVER CONFIGS (CHANNELS, CUSTOM MESSAGES, STAFF & PIN)
 ========================================================= */
 let serverConfigs = loadJSON("./server_configs.json", {});
 
@@ -156,6 +157,10 @@ const DEFAULT_GUILD_CONFIG = {
   staff: {
     users: {},
     roleLinks: {}
+  },
+  security: {
+    pinSalt: null,
+    pinHash: null
   }
 };
 
@@ -181,6 +186,10 @@ function getGuildConfig(guildId) {
       staff: {
         users: { ...(serverConfigs[guildId].staff?.users || {}) },
         roleLinks: { ...(serverConfigs[guildId].staff?.roleLinks || {}) }
+      },
+      security: {
+        pinSalt: serverConfigs[guildId].security?.pinSalt || null,
+        pinHash: serverConfigs[guildId].security?.pinHash || null
       }
     };
   }
@@ -199,6 +208,70 @@ function formatTemplate(template, { member, guild, level }) {
     .replace(/\{server\}/gi, guild?.name || "Server")
     .replace(/\{memberCount\}/gi, String(guild?.memberCount ?? ""))
     .replace(/\{level\}/gi, String(level ?? ""));
+}
+
+/* =========================================================
+   PER-SERVER OWNER 2FA / PIN AUTHENTICATION
+========================================================= */
+const unlockedOwnerSessions = new Map();
+const OWNER_SESSION_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+
+function hashPinWithSalt(pin, salt) {
+  return crypto.createHash("sha256").update(`${salt}:${String(pin).trim()}`).digest("hex");
+}
+
+function setGuildOwnerPin(guildId, newPin) {
+  const cfg = getGuildConfig(guildId);
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = hashPinWithSalt(newPin, salt);
+  cfg.security = { pinSalt: salt, pinHash: hash };
+  saveServerConfigs();
+}
+
+function hasGuildOwnerPin(guildId) {
+  const cfg = getGuildConfig(guildId);
+  return Boolean(cfg.security?.pinHash && cfg.security?.pinSalt);
+}
+
+function verifyGuildOwnerPin(guildId, inputPin) {
+  const cfg = getGuildConfig(guildId);
+  if (!cfg.security?.pinHash || !cfg.security?.pinSalt || !inputPin) return false;
+  const inputHash = hashPinWithSalt(inputPin, cfg.security.pinSalt);
+  const a = Buffer.from(inputHash, "hex");
+  const b = Buffer.from(cfg.security.pinHash, "hex");
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+function isOwnerSessionUnlocked(guildId, userId) {
+  const key = `${guildId}:${userId}`;
+  const expiresAt = unlockedOwnerSessions.get(key);
+  if (!expiresAt) return false;
+  if (Date.now() > expiresAt) {
+    unlockedOwnerSessions.delete(key);
+    return false;
+  }
+  return true;
+}
+
+async function requireOwnerAuth(interaction) {
+  if (!isServerOwner(interaction.user, interaction.guild)) return true;
+
+  if (!hasGuildOwnerPin(interaction.guildId)) {
+    await interaction.reply({
+      content: "🔐 **Owner PIN Not Set:** Before running major actions, set your personal security PIN with `/setpin pin:<your_pin>`.",
+      flags: MessageFlags.Ephemeral
+    });
+    return false;
+  }
+
+  if (isOwnerSessionUnlocked(interaction.guildId, interaction.user.id)) return true;
+
+  await interaction.reply({
+    content: "🔐 **Security Lock Active:** Run `/unlock pin:<your_pin>` to unlock major actions for 10 minutes.",
+    flags: MessageFlags.Ephemeral
+  });
+  return false;
 }
 
 /* =========================================================
@@ -652,6 +725,33 @@ const inviteCache = new Map();
    SLASH COMMAND DEFINITIONS (GLOBAL)
 ========================= */
 const commands = [
+  new SlashCommandBuilder()
+    .setName("setpin")
+    .setDescription("Set or change your server's Owner Security PIN (Server Owner Only)")
+    .addStringOption(o =>
+      o.setName("pin")
+        .setDescription("New security PIN (min 4 characters)")
+        .setRequired(true)
+    )
+    .addStringOption(o =>
+      o.setName("old_pin")
+        .setDescription("Current PIN (required if changing an existing PIN)")
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("unlock")
+    .setDescription("Unlock major owner actions for 10 minutes (Server Owner Only)")
+    .addStringOption(o =>
+      o.setName("pin")
+        .setDescription("Your server's Owner Security PIN")
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("lock")
+    .setDescription("Immediately lock your Owner Security session (Server Owner Only)"),
+
   new SlashCommandBuilder()
     .setName("staff")
     .setDescription("Manage per-server staff roles and hierarchy (Server Owner Only)")
@@ -1287,6 +1387,70 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
+    /* --- SET OR CHANGE SERVER OWNER PIN --- */
+    if (commandName === "setpin") {
+      if (!isServerOwner(interaction.user, interaction.guild)) {
+        return interaction.reply({ content: "❌ Only the **Server Owner** can set or change this server's PIN.", flags: MessageFlags.Ephemeral });
+      }
+
+      const newPin = interaction.options.getString("pin").trim();
+      const oldPin = interaction.options.getString("old_pin");
+
+      if (newPin.length < 4) {
+        return interaction.reply({ content: "❌ Your PIN must be at least **4 characters** long.", flags: MessageFlags.Ephemeral });
+      }
+
+      if (hasGuildOwnerPin(interaction.guildId)) {
+        if (!oldPin || !verifyGuildOwnerPin(interaction.guildId, oldPin)) {
+          return interaction.reply({ content: "❌ A PIN is already set for this server. Provide the correct `old_pin` to change it.", flags: MessageFlags.Ephemeral });
+        }
+      }
+
+      setGuildOwnerPin(interaction.guildId, newPin);
+      unlockedOwnerSessions.set(`${interaction.guildId}:${interaction.user.id}`, Date.now() + OWNER_SESSION_DURATION_MS);
+
+      return interaction.reply({
+        content: "✅ **Personal Owner PIN Saved!** Your session is unlocked for **10 minutes**. Keep this PIN private—changing it in the future requires your current PIN.",
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
+    /* --- UNLOCK OWNER SECURITY SESSION --- */
+    if (commandName === "unlock") {
+      if (!isServerOwner(interaction.user, interaction.guild)) {
+        return interaction.reply({ content: "❌ Only the **Server Owner** can use this command.", flags: MessageFlags.Ephemeral });
+      }
+
+      if (!hasGuildOwnerPin(interaction.guildId)) {
+        return interaction.reply({ content: "⚠️ No PIN is set yet. Run `/setpin pin:<your_pin>` first.", flags: MessageFlags.Ephemeral });
+      }
+
+      const pinInput = interaction.options.getString("pin");
+      if (!verifyGuildOwnerPin(interaction.guildId, pinInput)) {
+        console.warn(`[SECURITY ALERT] Failed Owner PIN attempt in ${interaction.guild.name} (${interaction.guild.id}) by ${interaction.user.tag}.`);
+        return interaction.reply({ content: "❌ Invalid Owner PIN.", flags: MessageFlags.Ephemeral });
+      }
+
+      unlockedOwnerSessions.set(`${interaction.guildId}:${interaction.user.id}`, Date.now() + OWNER_SESSION_DURATION_MS);
+      return interaction.reply({
+        content: "✅ **Owner Session Unlocked** for **10 minutes**.",
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
+    /* --- LOCK OWNER SECURITY SESSION --- */
+    if (commandName === "lock") {
+      if (!isServerOwner(interaction.user, interaction.guild)) {
+        return interaction.reply({ content: "❌ Only the **Server Owner** can use this command.", flags: MessageFlags.Ephemeral });
+      }
+
+      unlockedOwnerSessions.delete(`${interaction.guildId}:${interaction.user.id}`);
+      return interaction.reply({
+        content: "🔒 **Owner Session Locked.** Major actions now require `/unlock`.",
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
     /* --- STAFF ROLE MANAGEMENT (SERVER OWNER ONLY) --- */
     if (commandName === "staff") {
       if (!isServerOwner(interaction.user, interaction.guild)) {
@@ -1297,6 +1461,8 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       const sub = interaction.options.getSubcommand();
+      if (sub !== "list" && !(await requireOwnerAuth(interaction))) return;
+
       const cfg = getGuildConfig(interaction.guildId);
       const staffCfg = ensureStaffConfig(cfg);
 
@@ -1469,6 +1635,7 @@ client.on("interactionCreate", async (interaction) => {
     /* --- SETCHANNEL (ADMIN ONLY) --- */
     if (commandName === "setchannel") {
       if (!isGuildAdmin(member)) return noPerm();
+      if (!(await requireOwnerAuth(interaction))) return;
 
       const feature = interaction.options.getString("feature");
       const channel = interaction.options.getChannel("channel");
@@ -1488,6 +1655,7 @@ client.on("interactionCreate", async (interaction) => {
     /* --- SETMESSAGE (ADMIN ONLY) --- */
     if (commandName === "setmessage") {
       if (!isGuildAdmin(member)) return noPerm();
+      if (!(await requireOwnerAuth(interaction))) return;
 
       const type = interaction.options.getString("type");
       const text = interaction.options.getString("message").trim();
@@ -1508,6 +1676,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!isGuildAdmin(member)) return noPerm();
 
       const sub = interaction.options.getSubcommand();
+      if (sub !== "list" && !(await requireOwnerAuth(interaction))) return;
 
       if (sub === "add") {
         const tier = interaction.options.getString("tier");
@@ -1567,6 +1736,7 @@ client.on("interactionCreate", async (interaction) => {
     /* --- LEVELADD (ADMIN ONLY) --- */
     if (commandName === "leveladd") {
       if (!isGuildAdmin(member)) return noPerm();
+      if (!(await requireOwnerAuth(interaction))) return;
 
       const target = interaction.options.getUser("user");
       const amount = interaction.options.getInteger("amount");
@@ -1587,6 +1757,7 @@ client.on("interactionCreate", async (interaction) => {
     /* --- BAN (ADMIN ONLY) --- */
     if (commandName === "ban") {
       if (!canBan(member)) return noPerm();
+      if (!(await requireOwnerAuth(interaction))) return;
 
       const targetUser = interaction.options.getUser("user");
       const duration = interaction.options.getString("duration");
@@ -1660,6 +1831,7 @@ client.on("interactionCreate", async (interaction) => {
     /* --- UNBAN (ADMIN ONLY) --- */
     if (commandName === "unban") {
       if (!canBan(member)) return noPerm();
+      if (!(await requireOwnerAuth(interaction))) return;
 
       const userId = interaction.options.getString("user_id");
 
@@ -1915,6 +2087,10 @@ client.on("interactionCreate", async (interaction) => {
             .setColor(0x8600FF)
             .setTitle("⚙️ Server Setup & AutoMod Commands")
             .setDescription(
+              "• **`/setpin [pin] [old_pin]`**\n" +
+              "  └ *(Server Owner)* Set or change your personal 2FA PIN for major actions.\n\n" +
+              "• **`/unlock [pin]`** & **`/lock`**\n" +
+              "  └ *(Server Owner)* Unlock a 10-minute major-action session or lock immediately.\n\n" +
               "• **`/staff add | remove | linkrole | list`**\n" +
               "  └ *(Server Owner)* Assign CEO, Senior Admin, Junior Admin, Manager, Senior Mod, Junior Mod, or Support Staff.\n\n" +
               "• **`/setchannel [feature] [channel]`**\n" +
@@ -2006,7 +2182,7 @@ client.on("interactionCreate", async (interaction) => {
             "Select a module from the dropdown menu below to inspect commands, parameters, and usage.\n\n" +
             "**Directory Modules:**\n" +
             "• **🌐 General & Server** — Rules, guidelines, tickets, and terms\n" +
-            "• **⚙️ Server Setup & AutoMod** — Staff roles, channels, messages, and bad words\n" +
+            "• **⚙️ Server Setup & AutoMod** — Owner PIN, staff roles, channels, messages, and bad words\n" +
             "• **📊 Levels & Invites** — Level progress, invite tracking, AFK, and leaderboards\n" +
             "• **🎮 Mini-Games** — Snake, TicTacToe, Wordle, and Guess games\n" +
             "• **🛡️ Staff Operations** — Full moderation suite and giveaway system"
@@ -2022,7 +2198,7 @@ client.on("interactionCreate", async (interaction) => {
         .addOptions([
           { label: "Overview", description: "Main directory page", emoji: "📖", value: "overview" },
           { label: "General & Server Info", description: "Server rules, tickets, and guidelines", emoji: "🌐", value: "info" },
-          { label: "Server Setup & AutoMod", description: "Staff roles, channels, messages, and bad words", emoji: "⚙️", value: "setup" },
+          { label: "Server Setup & AutoMod", description: "Owner PIN, staff roles, channels, messages, and bad words", emoji: "⚙️", value: "setup" },
           { label: "Levels & Invites", description: "Level cards, invite stats, and leaderboards", emoji: "📊", value: "stats" },
           { label: "Mini-Games & Fun", description: "Snake, TicTacToe, Wordle, and Guess", emoji: "🎮", value: "games" },
           { label: "Staff & Moderation", description: "Warns, mutes, bans, and giveaways", emoji: "🛡️", value: "mod" }
@@ -3585,7 +3761,7 @@ Permanent Ban
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>#${escapeHtml(interaction.channel.name)}</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+- { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       background-color: #313338;
       color: #dbdee1;
