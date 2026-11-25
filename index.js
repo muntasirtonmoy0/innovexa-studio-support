@@ -698,6 +698,833 @@ function getResetTimers() {
   return { daily: `${hoursLeftDaily}h`, weekly: `${daysLeftWeekly}d`, monthly: `${daysLeftMonthly}d` };
 }
 
+/* =========================================================
+   BUILD 1: PREFIX, ECONOMY, 30 DINOSAURS, QUESTS & AUCTION
+========================================================= */
+const ALLOWED_PREFIXES = ["I", "In", "Inx", "Ins", "Innovexa", "Is"];
+const HUNT_COST = 10;
+const MAX_WARRIORS = 3;
+
+const DINO_TIERS = {
+  common: {
+    label: "Common",
+    weight: 50,
+    color: 0x9CA3AF,
+    baseHp: 90,
+    baseAtk: 18,
+    baseHeal: 8,
+    dinos: [
+      { id: "compsognathus", name: "Compsognathus", emoji: "🦎" },
+      { id: "gallimimus", name: "Gallimimus", emoji: "🦃" },
+      { id: "pachycephalosaurus", name: "Pachycephalosaurus", emoji: "🐏" },
+      { id: "parasaurolophus", name: "Parasaurolophus", emoji: "🦕" },
+      { id: "microraptor", name: "Microraptor", emoji: "🐦" }
+    ]
+  },
+  uncommon: {
+    label: "Uncommon",
+    weight: 25,
+    color: 0x22C55E,
+    baseHp: 125,
+    baseAtk: 26,
+    baseHeal: 12,
+    dinos: [
+      { id: "dilophosaurus", name: "Dilophosaurus", emoji: "🐍" },
+      { id: "iguanodon", name: "Iguanodon", emoji: "🦖" },
+      { id: "ankylosaurus", name: "Ankylosaurus", emoji: "🛡️" },
+      { id: "stegosaurus", name: "Stegosaurus", emoji: "🌿" },
+      { id: "baryonyx", name: "Baryonyx", emoji: "🐊" }
+    ]
+  },
+  rare: {
+    label: "Rare",
+    weight: 13,
+    color: 0x3B82F6,
+    baseHp: 165,
+    baseAtk: 36,
+    baseHeal: 18,
+    dinos: [
+      { id: "velociraptor", name: "Velociraptor", emoji: "⚡" },
+      { id: "triceratops", name: "Triceratops", emoji: "🦏" },
+      { id: "carnotaurus", name: "Carnotaurus", emoji: "🐂" },
+      { id: "allosaurus", name: "Allosaurus", emoji: "🦷" },
+      { id: "pteranodon", name: "Pteranodon", emoji: "🦅" }
+    ]
+  },
+  epic: {
+    label: "Epic",
+    weight: 7,
+    color: 0xA855F7,
+    baseHp: 220,
+    baseAtk: 50,
+    baseHeal: 25,
+    dinos: [
+      { id: "trex", name: "Tyrannosaurus Rex", emoji: "👑" },
+      { id: "spinosaurus", name: "Spinosaurus", emoji: "🌊" },
+      { id: "therizinosaurus", name: "Therizinosaurus", emoji: "🗡️" },
+      { id: "kentrosaurus", name: "Kentrosaurus", emoji: "🌵" },
+      { id: "mosasaurus", name: "Mosasaurus", emoji: "🦈" }
+    ]
+  },
+  legendary: {
+    label: "Legendary",
+    weight: 3.8,
+    color: 0xF59E0B,
+    baseHp: 295,
+    baseAtk: 68,
+    baseHeal: 36,
+    dinos: [
+      { id: "giganotosaurus", name: "Giganotosaurus", emoji: "🔥" },
+      { id: "brachiosaurus", name: "Brachiosaurus", emoji: "🏔️" },
+      { id: "argentinosaurus", name: "Argentinosaurus", emoji: "🌋" },
+      { id: "indominus", name: "Indominus Rex", emoji: "🌑" },
+      { id: "quetzalcoatlus", name: "Quetzalcoatlus", emoji: "🌩️" }
+    ]
+  },
+  mythic: {
+    label: "Mythic",
+    weight: 1.2,
+    color: 0xEC4899,
+    baseHp: 390,
+    baseAtk: 92,
+    baseHeal: 52,
+    dinos: [
+      { id: "chrono_rex", name: "Chrono Rex", emoji: "⏳" },
+      { id: "astral_wyvern", name: "Astral Wyvern", emoji: "✨" },
+      { id: "abyssal_leviathan", name: "Abyssal Leviathan", emoji: "🌌" },
+      { id: "solar_titan", name: "Solar Titan", emoji: "☀️" },
+      { id: "omega_drake", name: "Omega Drake", emoji: "🐉" }
+    ]
+  }
+};
+
+const WEAPON_CATALOG = [
+  { id: "bone_club", name: "Bone Club", emoji: "🦴", atk: 12, hp: 15, heal: 0 },
+  { id: "obsidian_fang", name: "Obsidian Fang", emoji: "🗡️", atk: 24, hp: 0, heal: 5 },
+  { id: "amber_aegis", name: "Amber Aegis", emoji: "🛡️", atk: 5, hp: 55, heal: 10 },
+  { id: "vital_totem", name: "Vital Totem", emoji: "🌿", atk: 4, hp: 25, heal: 28 },
+  { id: "starfall_glaive", name: "Starfall Glaive", emoji: "⚔️", atk: 38, hp: 35, heal: 15 }
+];
+
+let economyDB = loadJSON("./economy.json", {});
+let auctionsDB = loadJSON("./auctions.json", []);
+let ecoServerConfigs = loadJSON("./server_configs.json", {});
+
+function saveEconomy() {
+  fs.writeFileSync("./economy.json", JSON.stringify(economyDB, null, 2));
+}
+
+function saveAuctions() {
+  fs.writeFileSync("./auctions.json", JSON.stringify(auctionsDB, null, 2));
+}
+
+function saveEcoServerConfigs() {
+  fs.writeFileSync("./server_configs.json", JSON.stringify(ecoServerConfigs, null, 2));
+}
+
+function getSelectedServerPrefix(guildId) {
+  if (!guildId) return "In";
+  const p = ecoServerConfigs[guildId]?.prefix;
+  return ALLOWED_PREFIXES.includes(p) ? p : "In";
+}
+
+function setSelectedServerPrefix(guildId, prefix) {
+  if (!guildId || !ALLOWED_PREFIXES.includes(prefix)) return;
+  ecoServerConfigs[guildId] = { ...(ecoServerConfigs[guildId] || {}), prefix };
+  saveEcoServerConfigs();
+}
+
+function makeDailyQuests() {
+  return [
+    { id: "hunt", label: "Hunt 10 dinosaurs", progress: 0, target: 10, rewardCoins: 150, rewardXp: 60, claimed: false },
+    { id: "battle", label: "Complete 3 battles", progress: 0, target: 3, rewardCoins: 200, rewardXp: 90, claimed: false },
+    { id: "gamble", label: "Play 5 gamble/mini-games", progress: 0, target: 5, rewardCoins: 180, rewardXp: 75, claimed: false }
+  ];
+}
+
+function getEconomyUser(userId) {
+  if (!economyDB[userId]) {
+    economyDB[userId] = {
+      balance: 250,
+      gems: 0,
+      lootboxes: 1,
+      weaponCrates: 1,
+      weapons: [],
+      equippedWeaponId: null,
+      dinos: {},
+      warriors: [],
+      lastDaily: 0,
+      questDay: new Date().toDateString(),
+      quests: makeDailyQuests()
+    };
+    saveEconomy();
+  }
+  const u = economyDB[userId];
+  u.balance = Number.isFinite(u.balance) ? u.balance : 250;
+  u.gems = Number.isFinite(u.gems) ? u.gems : 0;
+  u.lootboxes = Number.isFinite(u.lootboxes) ? u.lootboxes : 0;
+  u.weaponCrates = Number.isFinite(u.weaponCrates) ? u.weaponCrates : 0;
+  u.weapons = Array.isArray(u.weapons) ? u.weapons : [];
+  u.dinos = u.dinos && typeof u.dinos === "object" ? u.dinos : {};
+  u.warriors = Array.isArray(u.warriors) ? u.warriors.slice(0, MAX_WARRIORS) : [];
+  u.lastDaily = u.lastDaily || 0;
+
+  if (u.questDay !== new Date().toDateString() || !Array.isArray(u.quests)) {
+    u.questDay = new Date().toDateString();
+    u.quests = makeDailyQuests();
+  }
+  return u;
+}
+
+function advanceQuest(userId, questId, amount = 1) {
+  const u = getEconomyUser(userId);
+  for (const q of u.quests) {
+    if (q.id === questId && !q.claimed) {
+      q.progress = Math.min(q.target, (q.progress || 0) + amount);
+      if (q.progress >= q.target) {
+        q.claimed = true;
+        u.balance += q.rewardCoins;
+        if (!levels[userId]) levels[userId] = { xp: 0, level: 1 };
+        levels[userId].xp += q.rewardXp;
+        saveLevels();
+      }
+    }
+  }
+  saveEconomy();
+}
+
+function findDinoByIdOrName(query) {
+  if (!query) return null;
+  const q = query.trim().toLowerCase().replace(/\s+/g, "_");
+  for (const [tierKey, tierData] of Object.entries(DINO_TIERS)) {
+    for (const d of tierData.dinos) {
+      if (d.id === q || d.name.toLowerCase() === query.trim().toLowerCase()) {
+        return { ...d, tierKey, tierLabel: tierData.label, tierData };
+      }
+    }
+  }
+  return null;
+}
+
+function rollRandomDino() {
+  const entries = Object.entries(DINO_TIERS);
+  const totalWeight = entries.reduce((acc, [, t]) => acc + t.weight, 0);
+  let r = Math.random() * totalWeight;
+  for (const [tierKey, tierData] of entries) {
+    r -= tierData.weight;
+    if (r <= 0) {
+      const dino = tierData.dinos[Math.floor(Math.random() * tierData.dinos.length)];
+      return { ...dino, tierKey, tierLabel: tierData.label, tierData };
+    }
+  }
+  const d = DINO_TIERS.common.dinos[0];
+  return { ...d, tierKey: "common", tierLabel: "Common", tierData: DINO_TIERS.common };
+}
+
+function getHuntRollsFromGems(gems) {
+  return 1 + Math.min(4, Math.floor((gems || 0) / 3));
+}
+
+function getEquippedWeapon(u) {
+  return u.equippedWeaponId ? WEAPON_CATALOG.find(w => w.id === u.equippedWeaponId) || null : null;
+}
+
+function performHunt(userId) {
+  const u = getEconomyUser(userId);
+  if (u.balance < HUNT_COST) {
+    return { ok: false, text: `❌ Hunting costs **${HUNT_COST}** currency. You have **${u.balance.toLocaleString()}**.` };
+  }
+
+  u.balance -= HUNT_COST;
+  const rolls = getHuntRollsFromGems(u.gems);
+  const caught = [];
+
+  for (let i = 0; i < rolls; i++) {
+    const dino = rollRandomDino();
+    u.dinos[dino.id] = (u.dinos[dino.id] || 0) + 1;
+    caught.push(dino);
+  }
+
+  let bonusDrop = null;
+  const dropRoll = Math.random();
+  if (dropRoll < 0.10) {
+    u.weaponCrates += 1;
+    bonusDrop = "🧰 **Weapon Crate x1**";
+  } else if (dropRoll < 0.22) {
+    u.lootboxes += 1;
+    bonusDrop = "📦 **Lootbox x1**";
+  }
+
+  saveEconomy();
+  advanceQuest(userId, "hunt", 1);
+
+  const lines = caught.map(d => `• ${d.emoji} **${d.name}** (*${d.tierLabel}*)`);
+  const embed = new EmbedBuilder()
+    .setColor(caught[0]?.tierData?.color || 0x8600FF)
+    .setTitle("🏹 Dinosaur Hunt Results")
+    .setDescription(
+      `Spent **${HUNT_COST}** currency • Gems: **${u.gems}** (*${rolls} roll(s)*)\n\n` +
+      `${lines.join("\n")}` +
+      (bonusDrop ? `\n\n✨ Bonus Find: ${bonusDrop}` : "")
+    )
+    .setFooter({ text: `Balance: ${u.balance.toLocaleString()}` })
+    .setTimestamp();
+
+  return { ok: true, embeds: [embed] };
+}
+
+function buildZooEmbed(targetUser) {
+  const u = getEconomyUser(targetUser.id);
+  const weapon = getEquippedWeapon(u);
+
+  const tierSections = Object.entries(DINO_TIERS).map(([, tData]) => {
+    const ownedInTier = tData.dinos
+      .map(d => ({ ...d, count: u.dinos[d.id] || 0 }))
+      .filter(d => d.count > 0);
+
+    const text = ownedInTier.length
+      ? ownedInTier.map(d => `${d.emoji} ${d.name} **x${d.count}**`).join(" • ")
+      : "*None caught yet*";
+
+    return `**${tData.label}:** ${text}`;
+  });
+
+  const warriorText = u.warriors.length
+    ? u.warriors.map((id, idx) => {
+        const info = findDinoByIdOrName(id);
+        return `**#${idx + 1}** ${info ? `${info.emoji} ${info.name} (*${info.tierLabel}*)` : id}`;
+      }).join("\n")
+    : "*No warriors set yet (max 3)*";
+
+  return new EmbedBuilder()
+    .setColor(0x8600FF)
+    .setTitle(`🦖 ${targetUser.username}'s Dino Zoo`)
+    .setThumbnail(targetUser.displayAvatarURL({ dynamic: true }))
+    .setDescription(
+      `💰 **Balance:** ${u.balance.toLocaleString()} | 💎 **Gems:** ${u.gems} | 📦 **Lootboxes:** ${u.lootboxes} | 🧰 **Weapon Crates:** ${u.weaponCrates}\n` +
+      `⚔️ **Equipped Weapon:** ${weapon ? `${weapon.emoji} **${weapon.name}** (+${weapon.atk} ATK, +${weapon.hp} HP, +${weapon.heal} Heal)` : "*None*"}\n\n` +
+      `**🛡️ Active Warriors (${u.warriors.length}/${MAX_WARRIORS}):**\n${warriorText}\n\n` +
+      `**🦕 Dinosaur Collection:**\n${tierSections.join("\n")}`
+    )
+    .setTimestamp();
+}
+
+function performDaily(userId) {
+  const u = getEconomyUser(userId);
+  const now = Date.now();
+  const oneDay = 24 * 60 * 60 * 1000;
+
+  if (now - u.lastDaily < oneDay) {
+    const remainingMs = oneDay - (now - u.lastDaily);
+    const hours = Math.floor(remainingMs / 3600000);
+    const mins = Math.floor((remainingMs % 3600000) / 60000);
+    return { ok: false, text: `⏳ You already claimed your daily reward. Try again in **${hours}h ${mins}m**.` };
+  }
+
+  u.lastDaily = now;
+  const coinReward = 350;
+  const xpReward = 120;
+  u.balance += coinReward;
+  u.lootboxes += 1;
+
+  if (!levels[userId]) levels[userId] = { xp: 0, level: 1 };
+  levels[userId].xp += xpReward;
+  saveLevels();
+  saveEconomy();
+
+  return {
+    ok: true,
+    text: `🎁 **Daily Reward Claimed!** You received **+${coinReward}** currency, **+${xpReward} XP**, and **+1 Lootbox**! Balance: **${u.balance.toLocaleString()}**.`
+  };
+}
+
+function buildQuestEmbed(targetUser) {
+  const u = getEconomyUser(targetUser.id);
+  const lines = u.quests.map((q, i) => {
+    const status = q.claimed ? "✅ Completed" : `${q.progress}/${q.target}`;
+    return `**${i + 1}. ${q.label}** — \`${status}\`\n└ Reward: **+${q.rewardCoins}** currency & **+${q.rewardXp}** XP`;
+  });
+
+  return new EmbedBuilder()
+    .setColor(0x8600FF)
+    .setTitle(`📜 ${targetUser.username}'s Daily Quests`)
+    .setDescription(lines.join("\n\n"))
+    .setFooter({ text: "Quests reset every day" })
+    .setTimestamp();
+}
+
+function performOpenBox(userId, boxType) {
+  const u = getEconomyUser(userId);
+  if (boxType === "lootbox") {
+    if (u.lootboxes < 1) return { ok: false, text: "❌ You don't have any **Lootboxes**." };
+    u.lootboxes -= 1;
+    const gemsFound = Math.floor(Math.random() * 3) + 1;
+    u.gems += gemsFound;
+    const dino = rollRandomDino();
+    u.dinos[dino.id] = (u.dinos[dino.id] || 0) + 1;
+    saveEconomy();
+    return { ok: true, text: `📦 Opened a **Lootbox** and got **+${gemsFound} Gems** (Total: **${u.gems}**, boosts hunt finds!) and ${dino.emoji} **${dino.name}** (*${dino.tierLabel}*)!` };
+  }
+
+  if (boxType === "weapon") {
+    if (u.weaponCrates < 1) return { ok: false, text: "❌ You don't have any **Weapon Crates**." };
+    u.weaponCrates -= 1;
+    const weapon = WEAPON_CATALOG[Math.floor(Math.random() * WEAPON_CATALOG.length)];
+    if (!u.weapons.includes(weapon.id)) u.weapons.push(weapon.id);
+    if (!u.equippedWeaponId) u.equippedWeaponId = weapon.id;
+    saveEconomy();
+    return { ok: true, text: `🧰 Opened a **Weapon Crate** and unlocked ${weapon.emoji} **${weapon.name}** (+${weapon.atk} ATK, +${weapon.hp} HP, +${weapon.heal} Heal)!` };
+  }
+
+  return { ok: false, text: "❌ Invalid crate type. Use `lootbox` or `weapon`." };
+}
+
+function settleExpiredAuctions() {
+  const now = Date.now();
+  let changed = false;
+  for (const auc of auctionsDB) {
+    if (!auc.ended && now >= auc.endsAt) {
+      auc.ended = true;
+      changed = true;
+      if (auc.highestBidderId) {
+        const buyer = getEconomyUser(auc.highestBidderId);
+        buyer.dinos[auc.dinoId] = (buyer.dinos[auc.dinoId] || 0) + 1;
+        const seller = getEconomyUser(auc.sellerId);
+        seller.balance += auc.highestBid;
+      } else {
+        const seller = getEconomyUser(auc.sellerId);
+        seller.dinos[auc.dinoId] = (seller.dinos[auc.dinoId] || 0) + 1;
+      }
+    }
+  }
+  if (changed) {
+    saveAuctions();
+    saveEconomy();
+  }
+}
+
+/* =========================================================
+   BUILD 2: BATTLES, GAMBLING & MINI-GAMES
+========================================================= */
+function buildWarriorSquad(userId) {
+  const u = getEconomyUser(userId);
+  const weapon = getEquippedWeapon(u);
+  let ids = [...u.warriors];
+
+  if (ids.length === 0) {
+    const owned = Object.entries(u.dinos)
+      .filter(([, count]) => count > 0)
+      .map(([id]) => findDinoByIdOrName(id))
+      .filter(Boolean)
+      .sort((a, b) => b.tierData.baseAtk - a.tierData.baseAtk);
+    ids = owned.slice(0, MAX_WARRIORS).map(d => d.id);
+  }
+
+  return ids.map(id => {
+    const d = findDinoByIdOrName(id);
+    if (!d) return null;
+    return {
+      name: d.name,
+      emoji: d.emoji,
+      tierLabel: d.tierLabel,
+      maxHp: d.tierData.baseHp + (weapon?.hp || 0),
+      hp: d.tierData.baseHp + (weapon?.hp || 0),
+      atk: d.tierData.baseAtk + (weapon?.atk || 0),
+      heal: d.tierData.baseHeal + (weapon?.heal || 0)
+    };
+  }).filter(Boolean);
+}
+
+function simulateDinoBattle(teamA, teamB) {
+  const logs = [];
+  let round = 1;
+  while (teamA.some(d => d.hp > 0) && teamB.some(d => d.hp > 0) && round <= 15) {
+    const a = teamA.find(d => d.hp > 0);
+    const b = teamB.find(d => d.hp > 0);
+
+    const dmgA = Math.max(5, Math.floor(a.atk * (0.85 + Math.random() * 0.3)));
+    b.hp = Math.max(0, b.hp - dmgA);
+    a.hp = Math.min(a.maxHp, a.hp + Math.floor(a.heal * 0.4));
+
+    if (b.hp > 0) {
+      const dmgB = Math.max(5, Math.floor(b.atk * (0.85 + Math.random() * 0.3)));
+      a.hp = Math.max(0, a.hp - dmgB);
+      b.hp = Math.min(b.maxHp, b.hp + Math.floor(b.heal * 0.4));
+      logs.push(`**R${round}:** ${a.emoji} ${a.name} hit for **${dmgA}** | ${b.emoji} ${b.name} hit for **${dmgB}**`);
+    } else {
+      logs.push(`**R${round}:** ${a.emoji} ${a.name} defeated ${b.emoji} **${b.name}**!`);
+    }
+    round++;
+  }
+  return { winner: teamA.some(d => d.hp > 0) ? "A" : "B", logs: logs.slice(-6) };
+}
+
+async function runDinoBattle(ctx, challenger, opponent, bet = 0) {
+  const send = payload => (ctx.reply ? ctx.reply(payload) : ctx.channel.send(payload));
+  const squadA = buildWarriorSquad(challenger.id);
+  if (!squadA.length) return send({ content: "❌ You have no dinosaurs! Hunt some first." });
+
+  const econA = getEconomyUser(challenger.id);
+  if (bet > 0 && econA.balance < bet) return send({ content: `❌ You don't have **${bet.toLocaleString()}** currency to bet.` });
+
+  if (!opponent || opponent.bot || opponent.id === challenger.id) {
+    if (bet > 0) return send({ content: "❌ Mention another user to place a battle bet (`battle @user 10000`)." });
+    const wildSquad = [rollRandomDino(), rollRandomDino(), rollRandomDino()].slice(0, squadA.length).map(d => ({
+      name: `Wild ${d.name}`, emoji: d.emoji, maxHp: d.tierData.baseHp, hp: d.tierData.baseHp, atk: d.tierData.baseAtk, heal: d.tierData.baseHeal
+    }));
+    const result = simulateDinoBattle(squadA, wildSquad);
+    advanceQuest(challenger.id, "battle", 1);
+    const won = result.winner === "A";
+    const xpGain = won ? 65 : 20;
+    if (!levels[challenger.id]) levels[challenger.id] = { xp: 0, level: 1 };
+    levels[challenger.id].xp += xpGain;
+    saveLevels();
+
+    let dropText = "";
+    if (won && Math.random() < 0.35) {
+      if (Math.random() < 0.5) { econA.lootboxes += 1; dropText = "\n📦 **Drop:** +1 Lootbox!"; }
+      else { econA.weaponCrates += 1; dropText = "\n🧰 **Drop:** +1 Weapon Crate!"; }
+      saveEconomy();
+    }
+    return send({ embeds: [new EmbedBuilder().setColor(won ? 0x22C55E : 0xEF4444).setTitle(won ? "⚔️ Wild Battle Victory!" : "💀 Wild Battle Defeat!").setDescription(`${result.logs.join("\n")}\n\n⭐ **Reward:** +${xpGain} XP${dropText}`).setTimestamp()] });
+  }
+
+  const squadB = buildWarriorSquad(opponent.id);
+  if (!squadB.length) return send({ content: `❌ ${opponent.username} has no dinosaurs to battle with!` });
+  const econB = getEconomyUser(opponent.id);
+  if (bet > 0 && econB.balance < bet) return send({ content: `❌ ${opponent.username} doesn't have **${bet.toLocaleString()}** currency to match your bet.` });
+
+  const acceptRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("pvp_accept").setLabel("Accept Battle").setEmoji("⚔️").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId("pvp_decline").setLabel("Decline").setEmoji("❌").setStyle(ButtonStyle.Danger)
+  );
+  const msg = await send({ content: `${opponent}, **${challenger.username}** challenged you to a Dinosaur Battle${bet > 0 ? ` for **${bet.toLocaleString()}** currency` : " (XP Battle)"}!`, components: [acceptRow], fetchReply: true });
+  const collector = msg.createMessageComponentCollector({ filter: i => i.user.id === opponent.id, time: 60000, max: 1 });
+
+  collector.on("collect", async i => {
+    if (i.customId === "pvp_decline") return i.update({ content: `❌ ${opponent.username} declined the battle.`, components: [] });
+    if (bet > 0 && (econA.balance < bet || econB.balance < bet)) return i.update({ content: "❌ Insufficient balance.", components: [] });
+
+    const res = simulateDinoBattle(squadA, squadB);
+    const winnerUser = res.winner === "A" ? challenger : opponent;
+    const loserUser = res.winner === "A" ? opponent : challenger;
+
+    if (bet > 0) {
+      getEconomyUser(winnerUser.id).balance += bet;
+      getEconomyUser(loserUser.id).balance -= bet;
+    }
+    if (!levels[winnerUser.id]) levels[winnerUser.id] = { xp: 0, level: 1 };
+    levels[winnerUser.id].xp += 100;
+    saveLevels();
+
+    let crateNote = "";
+    if (Math.random() < 0.4) {
+      getEconomyUser(winnerUser.id).weaponCrates += 1;
+      crateNote = "\n🧰 **Bonus Drop:** +1 Weapon Crate!";
+    }
+    saveEconomy();
+    advanceQuest(challenger.id, "battle", 1);
+    advanceQuest(opponent.id, "battle", 1);
+
+    await i.update({ content: "", embeds: [new EmbedBuilder().setColor(0xF59E0B).setTitle(`⚔️ ${challenger.username} vs ${opponent.username}`).setDescription(`${res.logs.join("\n")}\n\n🏆 **Winner:** ${winnerUser} (+100 XP${bet > 0 ? `, **+${bet.toLocaleString()}** currency` : ""})${crateNote}`).setTimestamp()], components: [] });
+  });
+}
+
+function runCoinflip(userId, bet, sideInput = "heads") {
+  const u = getEconomyUser(userId);
+  if (!bet || bet < 1) return { content: "❌ Enter a valid bet amount." };
+  if (u.balance < bet) return { content: `❌ Insufficient balance (**${u.balance.toLocaleString()}**).` };
+  const choice = sideInput.toLowerCase().startsWith("t") ? "tails" : "heads";
+  const result = Math.random() < 0.5 ? "heads" : "tails";
+  const won = choice === result;
+  u.balance += won ? bet : -bet;
+  saveEconomy();
+  advanceQuest(userId, "gamble", 1);
+  return { content: `🪙 Flipped **${result.toUpperCase()}**! You chose **${choice.toUpperCase()}** and ${won ? `won **+${bet.toLocaleString()}**` : `lost **-${bet.toLocaleString()}**`}! Balance: **${u.balance.toLocaleString()}**.` };
+}
+
+function runSpin(userId, bet) {
+  const u = getEconomyUser(userId);
+  if (!bet || bet < 1) return { content: "❌ Enter a valid bet amount." };
+  if (u.balance < bet) return { content: `❌ Insufficient balance (**${u.balance.toLocaleString()}**).` };
+  const symbols = ["🦖", "🦕", "⚡", "👑", "💎"];
+  const reels = [0, 1, 2].map(() => symbols[Math.floor(Math.random() * symbols.length)]);
+  u.balance -= bet;
+  let mult = 0;
+  if (reels[0] === reels[1] && reels[1] === reels[2]) mult = reels[0] === "💎" ? 5 : 3;
+  else if (reels[0] === reels[1] || reels[1] === reels[2] || reels[0] === reels[2]) mult = 1.5;
+  const payout = Math.floor(bet * mult);
+  u.balance += payout;
+  saveEconomy();
+  advanceQuest(userId, "gamble", 1);
+  return { embeds: [new EmbedBuilder().setColor(payout > 0 ? 0x22C55E : 0xEF4444).setTitle("🎰 Dino Slots").setDescription(`**[ ${reels.join(" | ")} ]**\n\n${payout > 0 ? `🎉 Won **+${payout.toLocaleString()}** (${mult}x)!` : `💸 Lost **${bet.toLocaleString()}**!`}\nBalance: **${u.balance.toLocaleString()}**`)] };
+}
+
+async function runMines(ctx, user, bet, bombCount = 3) {
+  const send = payload => (ctx.reply ? ctx.reply(payload) : ctx.channel.send(payload));
+  const u = getEconomyUser(user.id);
+  const bombs = Math.min(8, Math.max(1, bombCount || 3));
+  if (!bet || bet < 1) return send({ content: "❌ Enter a valid bet amount." });
+  if (u.balance < bet) return send({ content: `❌ Insufficient balance (**${u.balance.toLocaleString()}**).` });
+  u.balance -= bet;
+  saveEconomy();
+  advanceQuest(user.id, "gamble", 1);
+
+  const bombSet = new Set();
+  while (bombSet.size < bombs) bombSet.add(Math.floor(Math.random() * 16));
+  const revealed = new Set();
+  let multiplier = 1.0;
+  let ended = false;
+
+  const buildRows = (revealAll = false) => {
+    const rows = Array.from({ length: 4 }, (_, r) => new ActionRowBuilder().addComponents(Array.from({ length: 4 }, (_, c) => {
+      const idx = r * 4 + c;
+      const isBomb = bombSet.has(idx);
+      const isOpen = revealed.has(idx) || revealAll;
+      return new ButtonBuilder().setCustomId(`mine_${idx}`).setLabel(isOpen ? (isBomb ? "💣" : "💎") : "❓").setStyle(isOpen ? (isBomb ? ButtonStyle.Danger : ButtonStyle.Success) : ButtonStyle.Secondary).setDisabled(ended || revealed.has(idx));
+    })));
+    rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("mine_cashout").setLabel(`Cash Out (${Math.floor(bet * multiplier).toLocaleString()})`).setEmoji("💰").setStyle(ButtonStyle.Primary).setDisabled(ended || revealed.size === 0)));
+    return rows;
+  };
+
+  const msg = await send({ content: `💣 **Mines (${bombs} bombs)** | Bet: **${bet.toLocaleString()}** | Multiplier: **${multiplier.toFixed(2)}x**`, components: buildRows(false), fetchReply: true });
+  const collector = msg.createMessageComponentCollector({ filter: i => i.user.id === user.id, time: 180000 });
+
+  collector.on("collect", async i => {
+    if (i.customId === "mine_cashout") {
+      ended = true;
+      const winAmt = Math.floor(bet * multiplier);
+      u.balance += winAmt;
+      saveEconomy();
+      collector.stop("cashout");
+      return i.update({ content: `💰 **Cashed Out!** Won **+${winAmt.toLocaleString()}**! Balance: **${u.balance.toLocaleString()}**`, components: buildRows(true) });
+    }
+    const idx = parseInt(i.customId.split("_")[1], 10);
+    if (bombSet.has(idx)) {
+      ended = true;
+      collector.stop("boom");
+      return i.update({ content: `💥 **BOOM!** You hit a bomb and lost **${bet.toLocaleString()}**!`, components: buildRows(true) });
+    }
+    revealed.add(idx);
+    multiplier = +(multiplier + 0.25 + bombs * 0.06).toFixed(2);
+    await i.update({ content: `💣 **Mines (${bombs} bombs)** | Bet: **${bet.toLocaleString()}** | Multiplier: **${multiplier.toFixed(2)}x**`, components: buildRows(false) });
+  });
+}
+
+async function runRps(ctx, p1, p2, bet = 0) {
+  const send = payload => (ctx.reply ? ctx.reply(payload) : ctx.channel.send(payload));
+  const isBot = !p2 || p2.bot || p2.id === p1.id;
+  if (bet > 0) {
+    if (getEconomyUser(p1.id).balance < bet) return send({ content: "❌ Insufficient balance." });
+    if (!isBot && getEconomyUser(p2.id).balance < bet) return send({ content: `❌ ${p2.username} lacks currency for this bet.` });
+  }
+  advanceQuest(p1.id, "gamble", 1);
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("rps_rock").setLabel("Rock").setEmoji("🪨").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("rps_paper").setLabel("Paper").setEmoji("📄").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("rps_scissors").setLabel("Scissors").setEmoji("✂️").setStyle(ButtonStyle.Secondary)
+  );
+  const choices = {};
+  const msg = await send({ content: `✊ **Rock Paper Scissors:** ${p1} vs ${isBot ? "Bot" : p2}${bet > 0 ? ` (Bet: **${bet.toLocaleString()}**)` : ""}\nPick your move!`, components: [row], fetchReply: true });
+  const collector = msg.createMessageComponentCollector({ filter: i => i.user.id === p1.id || (!isBot && i.user.id === p2.id), time: 60000 });
+
+  collector.on("collect", async i => {
+    choices[i.user.id] = i.customId.split("_")[1];
+    if (isBot) choices.bot = ["rock", "paper", "scissors"][Math.floor(Math.random() * 3)];
+    const ready = isBot ? Boolean(choices[p1.id]) : Boolean(choices[p1.id] && choices[p2.id]);
+    if (!ready) return i.reply({ content: "✅ Move locked in! Waiting for opponent...", ephemeral: true });
+
+    collector.stop("done");
+    const c1 = choices[p1.id], c2 = isBot ? choices.bot : choices[p2.id];
+    const beats = { rock: "scissors", paper: "rock", scissors: "paper" };
+    let outcome = "🤝 It's a tie!";
+    if (c1 !== c2) {
+      const p1Won = beats[c1] === c2;
+      if (bet > 0) {
+        getEconomyUser(p1.id).balance += p1Won ? bet : -bet;
+        if (!isBot) getEconomyUser(p2.id).balance += p1Won ? -bet : bet;
+        saveEconomy();
+      }
+      outcome = p1Won ? `🎉 **${p1.username}** wins${bet > 0 ? ` **+${bet.toLocaleString()}**` : ""}!` : `🎉 **${isBot ? "Bot" : p2.username}** wins${bet > 0 ? ` **+${bet.toLocaleString()}**` : ""}!`;
+    }
+    await i.update({ content: `${p1.username}: **${c1.toUpperCase()}** vs ${isBot ? "Bot" : p2.username}: **${c2.toUpperCase()}**\n${outcome}`, components: [] });
+  });
+}
+
+async function runTypingRace(ctx, user, bet) {
+  const send = payload => (ctx.reply ? ctx.reply(payload) : ctx.channel.send(payload));
+  const u = getEconomyUser(user.id);
+  if (!bet || bet < 1) return send({ content: "❌ Specify a valid bet amount (`typingrace 100`)." });
+  if (u.balance < bet) return send({ content: `❌ Insufficient balance (**${u.balance.toLocaleString()}**).` });
+  u.balance -= bet;
+  saveEconomy();
+  advanceQuest(user.id, "gamble", 1);
+
+  const wordPool = ["velociraptor", "extinction", "meteorite", "predator", "jurassic", "fossil", "carnivore", "evolution", "chronicle", "amber"];
+  const words = Array.from({ length: 6 }, () => wordPool[Math.floor(Math.random() * wordPool.length)]);
+  let idx = 0, multiplier = 1.0;
+
+  await send({ content: `⌨️ **Typing Race Started!** Entry Bet: **${bet.toLocaleString()}**\nEach word adds **+0.25x**—missing or mistyping **ONE** word loses everything!\n\n👉 Word 1/${words.length}: **\`${words[0]}\`**` });
+  const collector = ctx.channel.createMessageCollector({ filter: m => m.author.id === user.id, time: 45000 });
+
+  collector.on("collect", async m => {
+    const typed = m.content.trim().toLowerCase();
+    if (typed !== words[idx]) {
+      collector.stop("mistake");
+      return m.reply(`💥 **Wrong word!** You typed \`${typed}\` instead of \`${words[idx]}\` and lost your **${bet.toLocaleString()}** bet!`);
+    }
+    idx++;
+    multiplier = +(1 + idx * 0.25).toFixed(2);
+    if (idx >= words.length) {
+      collector.stop("finished");
+      const payout = Math.floor(bet * multiplier);
+      u.balance += payout;
+      saveEconomy();
+      return m.reply(`🏆 **Flawless Typing Race!** Completed all ${words.length} words at **${multiplier}x** and won **+${payout.toLocaleString()}**! Balance: **${u.balance.toLocaleString()}**`);
+    }
+    collector.resetTimer({ time: 45000 });
+    await m.reply(`✅ **${multiplier}x**! Next word (${idx + 1}/${words.length}): **\`${words[idx]}\`**`);
+  });
+
+  collector.on("end", (_, reason) => {
+    if (reason === "time") ctx.channel.send(`⏱️ ${user}, time ran out! You lost your **${bet.toLocaleString()}** bet.`);
+  });
+}
+
+async function runUno(ctx, p1, p2, bet = 0) {
+  const send = payload => (ctx.reply ? ctx.reply(payload) : ctx.channel.send(payload));
+  const isBot = !p2 || p2.bot || p2.id === p1.id;
+  if (bet > 0) {
+    if (getEconomyUser(p1.id).balance < bet) return send({ content: "❌ Insufficient balance." });
+    if (!isBot && getEconomyUser(p2.id).balance < bet) return send({ content: `❌ ${p2.username} lacks currency.` });
+  }
+  advanceQuest(p1.id, "gamble", 1);
+
+  const colors = ["🔴", "🟡", "🟢", "🔵"];
+  const drawCard = () => ({ color: colors[Math.floor(Math.random() * 4)], num: Math.floor(Math.random() * 9) + 1 });
+  const hands = { [p1.id]: Array.from({ length: 5 }, drawCard), [isBot ? "bot" : p2.id]: Array.from({ length: 5 }, drawCard) };
+  let topCard = drawCard(), turn = p1.id;
+
+  const renderButtons = uid => {
+    const row = new ActionRowBuilder();
+    (hands[uid] || []).slice(0, 4).forEach((c, i) => {
+      const playable = c.color === topCard.color || c.num === topCard.num;
+      row.addComponents(new ButtonBuilder().setCustomId(`uno_play_${i}`).setLabel(`${c.color} ${c.num}`).setStyle(playable ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!playable));
+    });
+    row.addComponents(new ButtonBuilder().setCustomId("uno_draw").setLabel("Draw").setEmoji("🃏").setStyle(ButtonStyle.Primary));
+    return [row];
+  };
+
+  const msg = await send({ content: `🃏 **UNO Match** | Top Card: **${topCard.color} ${topCard.num}**\n🎯 Turn: <@${turn}> (${hands[turn].length} cards)`, components: renderButtons(turn), fetchReply: true });
+  const collector = msg.createMessageComponentCollector({ filter: i => i.user.id === turn, time: 180000 });
+
+  collector.on("collect", async i => {
+    if (i.customId === "uno_draw") hands[turn].push(drawCard());
+    else topCard = hands[turn].splice(parseInt(i.customId.split("_")[2], 10), 1)[0];
+
+    if (hands[turn].length === 0) {
+      collector.stop("win");
+      if (bet > 0) {
+        getEconomyUser(turn).balance += bet;
+        const loserId = turn === p1.id ? (isBot ? null : p2.id) : p1.id;
+        if (loserId) getEconomyUser(loserId).balance -= bet;
+        saveEconomy();
+      }
+      return i.update({ content: `🎉 **UNO!** <@${turn}> emptied their hand and won${bet > 0 ? ` **+${bet.toLocaleString()}**` : ""}!`, components: [] });
+    }
+
+    turn = turn === p1.id ? (isBot ? "bot" : p2.id) : p1.id;
+    if (isBot && turn === "bot") {
+      const idx = hands.bot.findIndex(c => c.color === topCard.color || c.num === topCard.num);
+      if (idx !== -1) topCard = hands.bot.splice(idx, 1)[0]; else hands.bot.push(drawCard());
+      if (hands.bot.length === 0) {
+        collector.stop("botwin");
+        if (bet > 0) { getEconomyUser(p1.id).balance -= bet; saveEconomy(); }
+        return i.update({ content: `🤖 **Bot called UNO and won!**${bet > 0 ? ` (-${bet.toLocaleString()})` : ""}`, components: [] });
+      }
+      turn = p1.id;
+    }
+
+    await i.update({ content: `🃏 **UNO Match** | Top Card: **${topCard.color} ${topCard.num}**\n🎯 Turn: <@${turn}> (${hands[turn].length} cards)`, components: renderButtons(turn) });
+  });
+}
+
+async function runChess(ctx, p1, p2, bet = 0) {
+  const send = payload => (ctx.reply ? ctx.reply(payload) : ctx.channel.send(payload));
+  const isBot = !p2 || p2.bot || p2.id === p1.id;
+  if (bet > 0) {
+    if (getEconomyUser(p1.id).balance < bet) return send({ content: "❌ Insufficient balance." });
+    if (!isBot && getEconomyUser(p2.id).balance < bet) return send({ content: `❌ ${p2.username} lacks currency.` });
+  }
+  advanceQuest(p1.id, "gamble", 1);
+
+  const board = [
+    ["♜","♞","♝","♛","♚","♝","♞","♜"],
+    ["♟","♟","♟","♟","♟","♟","♟","♟"],
+    ["·","·","·","·","·","·","·","·"],
+    ["·","·","·","·","·","·","·","·"],
+    ["·","·","·","·","·","·","·","·"],
+    ["·","·","·","·","·","·","·","·"],
+    ["♙","♙","♙","♙","♙","♙","♙","♙"],
+    ["♖","♘","♗","♕","♔","♗","♘","♖"]
+  ];
+  const whitePieces = new Set(["♙","♖","♘","♗","♕","♔"]);
+  const blackPieces = new Set(["♟","♜","♞","♝","♛","♚"]);
+  let whiteTurn = true;
+
+  const render = () => "```\n" + board.map((r, i) => `${8 - i} ${r.join(" ")}`).join("\n") + "\n  a b c d e f g h\n```";
+  const parseSq = sq => /^[a-h][1-8]$/.test(sq) ? { col: sq.charCodeAt(0) - 97, row: 8 - parseInt(sq[1], 10) } : null;
+
+  await send({ content: `♟️ **Chess:** ${p1} (White) vs ${isBot ? "Bot" : p2} (Black)${bet > 0 ? ` | Bet: **${bet.toLocaleString()}**` : ""}\nType moves like \`e2 e4\` or \`resign\`.\n${render()}` });
+  const collector = ctx.channel.createMessageCollector({ filter: m => m.author.id === (whiteTurn ? p1.id : (isBot ? "" : p2.id)), time: 10 * 60 * 1000 });
+
+  collector.on("collect", async m => {
+    const txt = m.content.trim().toLowerCase();
+    if (txt === "resign") {
+      collector.stop("resign");
+      const winnerId = whiteTurn ? (isBot ? null : p2.id) : p1.id;
+      if (bet > 0) {
+        getEconomyUser(m.author.id).balance -= bet;
+        if (winnerId) getEconomyUser(winnerId).balance += bet;
+        saveEconomy();
+      }
+      return m.reply(`🏳️ ${m.author.username} resigned!${bet > 0 ? ` (**${bet.toLocaleString()}** settled)` : ""}`);
+    }
+    const parts = txt.split(/\s+/);
+    if (parts.length !== 2) return;
+    const from = parseSq(parts[0]), to = parseSq(parts[1]);
+    if (!from || !to) return;
+
+    const piece = board[from.row][from.col];
+    if (!(whiteTurn ? whitePieces : blackPieces).has(piece)) return m.reply("⚠️ Select one of your own pieces.").then(x => setTimeout(() => x.delete().catch(() => {}), 3000));
+
+    const captured = board[to.row][to.col];
+    board[to.row][to.col] = piece;
+    board[from.row][from.col] = "·";
+
+    if (captured === "♚" || captured === "♔") {
+      collector.stop("king");
+      if (bet > 0) {
+        getEconomyUser(m.author.id).balance += bet;
+        const loserId = whiteTurn ? (isBot ? null : p2.id) : p1.id;
+        if (loserId) getEconomyUser(loserId).balance -= bet;
+        saveEconomy();
+      }
+      return m.reply(`👑 **Checkmate / King Captured!** ${m.author} wins${bet > 0 ? ` **+${bet.toLocaleString()}**` : ""}!\n${render()}`);
+    }
+
+    whiteTurn = !whiteTurn;
+    if (isBot && !whiteTurn) {
+      const moves = [];
+      for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) if (blackPieces.has(board[r][c]) && r + 1 < 8 && !blackPieces.has(board[r + 1][c])) moves.push({ fr: r, fc: c, tr: r + 1, tc: c });
+      if (moves.length) { const mv = moves[Math.floor(Math.random() * moves.length)]; board[mv.tr][mv.tc] = board[mv.fr][mv.fc]; board[mv.fr][mv.fc] = "·"; }
+      whiteTurn = true;
+    }
+    await m.reply({ content: `Turn: **${whiteTurn ? p1.username : (isBot ? "Bot" : p2.username)}**\n${render()}` });
+  });
+}
+
 /* =========================
    DISCORD CLIENT
 ========================= */
@@ -1100,6 +1927,123 @@ const commands = [
         )
     ),
 
+new SlashCommandBuilder()
+    .setName("prefix")
+    .setDescription("Select a command prefix for this server (Server Owner Only)")
+    .addSubcommand(sub =>
+      sub.setName("select")
+        .setDescription("Open the prefix selector dropdown menu")
+    ),
+
+  new SlashCommandBuilder()
+    .setName("hunt")
+    .setDescription(`Hunt wild dinosaurs (Costs ${HUNT_COST} currency; gems increase finds)`),
+
+  new SlashCommandBuilder()
+    .setName("zoo")
+    .setDescription("View your dinosaur collection and active warriors")
+    .addUserOption(o => o.setName("user").setDescription("User to view (optional)").setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName("team")
+    .setDescription("Set or view your 3 active warrior dinosaurs")
+    .addStringOption(o => o.setName("dino1").setDescription("Warrior #1 dinosaur name").setRequired(false))
+    .addStringOption(o => o.setName("dino2").setDescription("Warrior #2 dinosaur name").setRequired(false))
+    .addStringOption(o => o.setName("dino3").setDescription("Warrior #3 dinosaur name").setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName("open")
+    .setDescription("Open a Lootbox or Weapon Crate")
+    .addStringOption(o =>
+      o.setName("box")
+        .setDescription("Choose box type")
+        .setRequired(true)
+        .addChoices(
+          { name: "Lootbox (Gems & Dinos)", value: "lootbox" },
+          { name: "Weapon Crate (Weapons)", value: "weapon" }
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("equip")
+    .setDescription("Equip a weapon from your inventory")
+    .addStringOption(o => o.setName("weapon").setDescription("Weapon name").setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName("daily")
+    .setDescription("Claim your 24-hour currency and XP reward"),
+
+  new SlashCommandBuilder()
+    .setName("quest")
+    .setDescription("View your daily quests and progress"),
+
+  new SlashCommandBuilder()
+    .setName("auction")
+    .setDescription("Global dinosaur auction house across all servers")
+    .addSubcommand(sub =>
+      sub.setName("list")
+        .setDescription("Put a Rare+ dinosaur up for global auction")
+        .addStringOption(o => o.setName("dino").setDescription("Dinosaur name (Rare, Epic, Legendary, or Mythic)").setRequired(true))
+        .addIntegerOption(o => o.setName("start_bid").setDescription("Minimum starting bid").setRequired(true))
+        .addStringOption(o => o.setName("duration").setDescription("Duration (e.g. 10m, 1h, 12h)").setRequired(true))
+    )
+    .addSubcommand(sub =>
+      sub.setName("bid")
+        .setDescription("Place a higher bid on an active auction")
+        .addStringOption(o => o.setName("auction_id").setDescription("Auction ID").setRequired(true))
+        .addIntegerOption(o => o.setName("amount").setDescription("Your bid amount").setRequired(true))
+    )
+    .addSubcommand(sub =>
+      sub.setName("active")
+        .setDescription("View active global auctions")
+    ),
+
+new SlashCommandBuilder()
+    .setName("battle")
+    .setDescription("Battle wild dinosaurs for XP or challenge a user with a currency bet")
+    .addUserOption(o => o.setName("opponent").setDescription("User to challenge (optional)").setRequired(false))
+    .addIntegerOption(o => o.setName("bet").setDescription("Currency bet amount (optional)").setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName("coinflip")
+    .setDescription("Flip a coin and bet currency")
+    .addIntegerOption(o => o.setName("bet").setDescription("Amount to bet").setRequired(true))
+    .addStringOption(o => o.setName("side").setDescription("Heads or Tails").setRequired(false).addChoices({ name: "Heads", value: "heads" }, { name: "Tails", value: "tails" })),
+
+  new SlashCommandBuilder()
+    .setName("spin")
+    .setDescription("Spin the dinosaur slot machine")
+    .addIntegerOption(o => o.setName("bet").setDescription("Amount to bet").setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName("mines")
+    .setDescription("Play Minesweeper gamble—cash out before hitting a bomb!")
+    .addIntegerOption(o => o.setName("bet").setDescription("Amount to bet").setRequired(true))
+    .addIntegerOption(o => o.setName("bombs").setDescription("Number of bombs (1-8, default 3)").setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName("rps")
+    .setDescription("Play Rock Paper Scissors (vs Bot or Friend, with optional bet)")
+    .addUserOption(o => o.setName("opponent").setDescription("Friend to challenge (optional)").setRequired(false))
+    .addIntegerOption(o => o.setName("bet").setDescription("Currency bet (optional)").setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName("chess")
+    .setDescription("Play Chess (vs Bot or Friend, with optional bet)")
+    .addUserOption(o => o.setName("opponent").setDescription("Friend to challenge (optional)").setRequired(false))
+    .addIntegerOption(o => o.setName("bet").setDescription("Currency bet (optional)").setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName("uno")
+    .setDescription("Play UNO (vs Bot or Friend, with optional bet)")
+    .addUserOption(o => o.setName("opponent").setDescription("Friend to challenge (optional)").setRequired(false))
+    .addIntegerOption(o => o.setName("bet").setDescription("Currency bet (optional)").setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName("typingrace")
+    .setDescription("Singleplayer Typing Race: each word multiplies payout; 1 mistake loses all!")
+    .addIntegerOption(o => o.setName("bet").setDescription("Entry bet amount").setRequired(true)),
+   
   new SlashCommandBuilder()
     .setName("leaderboard")
     .setDescription("View server rankings for Levels, Daily Chat, and Invites")
@@ -1253,6 +2197,152 @@ client.on("messageCreate", async (message) => {
   /* --- 1. TRACK MESSAGE STATS --- */
   trackUserMessage(message.author.id);
 
+/* --- BUILD 1 PREFIX COMMANDS (ECONOMY, DINOS & BASIC MOD) --- */
+  const activePrefix = getSelectedServerPrefix(message.guild.id);
+  const prefixRegex = new RegExp(`^(${activePrefix})(?:\\s+|$)`, "i");
+  const prefixMatch = message.content.match(prefixRegex);
+
+  if (prefixMatch) {
+    const restText = message.content.slice(prefixMatch[0].length).trim();
+    const parts = restText.split(/\s+/).filter(Boolean);
+    const cmd = (parts[0] || "").toLowerCase();
+    const args = parts.slice(1);
+
+    if (cmd === "hunt" || cmd === "h") {
+      const res = performHunt(message.author.id);
+      return message.reply(res.ok ? { embeds: res.embeds } : { content: res.text });
+    }
+
+    if (cmd === "zoo" || cmd === "z") {
+      const target = message.mentions.users.first() || message.author;
+      return message.reply({ embeds: [buildZooEmbed(target)] });
+    }
+
+    if (cmd === "daily" || cmd === "d") {
+      const res = performDaily(message.author.id);
+      return message.reply({ content: res.text });
+    }
+
+    if (cmd === "quest" || cmd === "q") {
+      return message.reply({ embeds: [buildQuestEmbed(message.author)] });
+    }
+
+    if (cmd === "open") {
+      const res = performOpenBox(message.author.id, (args[0] || "").toLowerCase());
+      return message.reply({ content: res.text });
+    }
+
+    if (cmd === "battle" || cmd === "b") {
+      const opp = message.mentions.users.first() || null;
+      const betArg = args.find(a => /^\d+$/.test(a));
+      return runDinoBattle(message, message.author, opp, betArg ? parseInt(betArg, 10) : 0);
+    }
+    if (cmd === "coinflip" || cmd === "cf") return message.reply(runCoinflip(message.author.id, parseInt(args[0], 10), args[1] || "heads"));
+    if (cmd === "spin" || cmd === "slots" || cmd === "s") return message.reply(runSpin(message.author.id, parseInt(args[0], 10)));
+    if (cmd === "mines" || cmd === "m") return runMines(message, message.author, parseInt(args[0], 10), parseInt(args[1], 10) || 3);
+    if (cmd === "rps") return runRps(message, message.author, message.mentions.users.first() || null, parseInt(args.find(a => /^\d+$/.test(a)) || "0", 10));
+    if (cmd === "chess") return runChess(message, message.author, message.mentions.users.first() || null, parseInt(args.find(a => /^\d+$/.test(a)) || "0", 10));
+    if (cmd === "uno") return runUno(message, message.author, message.mentions.users.first() || null, parseInt(args.find(a => /^\d+$/.test(a)) || "0", 10));
+    if (cmd === "typingrace" || cmd === "tr") return runTypingRace(message, message.author, parseInt(args[0], 10));
+     
+    if (cmd === "equip") {
+      const wName = args.join(" ").toLowerCase();
+      const u = getEconomyUser(message.author.id);
+      const found = WEAPON_CATALOG.find(w => w.name.toLowerCase() === wName || w.id === wName);
+      if (!found || !u.weapons.includes(found.id)) {
+        return message.reply({ content: "❌ You don't own that weapon." });
+      }
+      u.equippedWeaponId = found.id;
+      saveEconomy();
+      return message.reply({ content: `⚔️ Equipped ${found.emoji} **${found.name}**!` });
+    }
+
+    if (cmd === "team" || cmd === "warriors") {
+      const u = getEconomyUser(message.author.id);
+      if (!args.length) {
+        return message.reply({ embeds: [buildZooEmbed(message.author)] });
+      }
+      const chosen = args.join(" ").split(",").map(s => s.trim()).filter(Boolean).slice(0, MAX_WARRIORS);
+      const newTeam = [];
+      for (const namePart of chosen) {
+        const d = findDinoByIdOrName(namePart);
+        if (!d || (u.dinos[d.id] || 0) < 1) {
+          return message.reply({ content: `❌ You don't own dinosaur **${namePart}**.` });
+        }
+        if (!newTeam.includes(d.id)) newTeam.push(d.id);
+      }
+      u.warriors = newTeam;
+      saveEconomy();
+      return message.reply({ content: `🛡️ Updated active warriors (${newTeam.length}/${MAX_WARRIORS})!` });
+    }
+
+    if (cmd === "auction" || cmd === "auc") {
+      settleExpiredAuctions();
+      const sub = (args[0] || "active").toLowerCase();
+      if (sub === "active" || sub === "list_view") {
+        const active = auctionsDB.filter(a => !a.ended);
+        if (!active.length) return message.reply({ content: "🏛️ No active global auctions right now." });
+        const lines = active.slice(0, 10).map(a =>
+          `• **ID:** \`${a.id}\` | ${a.dinoEmoji} **${a.dinoName}** (*${a.tierLabel}*) | Bid: **${a.highestBid.toLocaleString()}** ${a.highestBidderId ? `by <@${a.highestBidderId}>` : "(No bids)"} | Ends <t:${Math.floor(a.endsAt / 1000)}:R>`
+        );
+        return message.reply({ embeds: [new EmbedBuilder().setColor(0x8600FF).setTitle("🏛️ Global Dinosaur Auctions").setDescription(lines.join("\n\n"))] });
+      }
+      if (sub === "bid") {
+        const aucId = args[1];
+        const bidAmt = parseInt(args[2], 10);
+        const auc = auctionsDB.find(a => a.id === aucId && !a.ended);
+        if (!auc) return message.reply({ content: "❌ Active auction not found." });
+        if (isNaN(bidAmt) || bidAmt <= auc.highestBid) return message.reply({ content: `❌ Bid must be higher than **${auc.highestBid.toLocaleString()}**.` });
+        const bidder = getEconomyUser(message.author.id);
+        if (bidder.balance < bidAmt) return message.reply({ content: "❌ Insufficient balance." });
+        auc.highestBid = bidAmt;
+        auc.highestBidderId = message.author.id;
+        saveAuctions();
+        return message.reply({ content: `🔨 Bid of **${bidAmt.toLocaleString()}** placed on ${auc.dinoEmoji} **${auc.dinoName}** (\`${auc.id}\`)!` });
+      }
+    }
+
+    if (cmd === "warn") {
+      if (!canWarn(member)) return message.reply({ content: "❌ No permission to warn." });
+      const target = message.mentions.users.first();
+      if (!target) return message.reply({ content: `❌ Usage: \`${activePrefix} warn @user <reason>\`` });
+      const reason = args.slice(1).join(" ") || "No reason provided";
+      if (!warnings[target.id]) warnings[target.id] = [];
+      warnings[target.id].push({ reason, date: Date.now() });
+      saveWarnings();
+      return message.reply({ content: `⚠️ ${target.tag} warned.\nReason: ${reason}` });
+    }
+
+    if (cmd === "mute") {
+      if (!canMute(member)) return message.reply({ content: "❌ No permission to mute." });
+      const target = message.mentions.users.first();
+      if (!target) return message.reply({ content: `❌ Usage: \`${activePrefix} mute @user <reason>\`` });
+      const targetMember = await message.guild.members.fetch(target.id).catch(() => null);
+      if (!targetMember) return message.reply({ content: "❌ Member not found." });
+      if (!canActOnTarget(member, targetMember)) return message.reply({ content: "❌ Cannot mute someone of equal or higher rank." });
+      const reason = args.slice(1).join(" ") || "No reason provided";
+      await targetMember.timeout(28 * 24 * 60 * 60 * 1000, reason).catch(() => null);
+      if (!mutes[target.id]) mutes[target.id] = { history: [] };
+      mutes[target.id].history.push({ action: "Mute", moderator: message.author.tag, reason, date: Date.now() });
+      saveMutes();
+      return message.reply({ content: `🔇 ${target.tag} muted.\nReason: ${reason}` });
+    }
+
+    if (cmd === "ban") {
+      if (!canBan(member)) return message.reply({ content: "❌ No permission to ban." });
+      const target = message.mentions.users.first();
+      if (!target) return message.reply({ content: `❌ Usage: \`${activePrefix} ban @user <reason>\`` });
+      const targetMember = await message.guild.members.fetch(target.id).catch(() => null);
+      if (targetMember && !canActOnTarget(member, targetMember)) return message.reply({ content: "❌ Cannot ban someone of equal or higher rank." });
+      const reason = args.slice(1).join(" ") || "No reason provided";
+      await message.guild.members.ban(target.id, { reason }).catch(() => null);
+      if (!bans[target.id]) bans[target.id] = { history: [] };
+      bans[target.id].history.push({ action: "Ban", moderator: message.author.tag, reason, duration: "Permanent", date: Date.now() });
+      saveBans();
+      return message.reply({ content: `🔨 ${target.tag} banned.\nReason: ${reason}` });
+    }
+  }
+   
   /* --- 2. AFK SYSTEM: CLEAR AFK UPON TALKING --- */
   if (afkData[message.author.id]?.isAfk) {
     const data = afkData[message.author.id];
@@ -1386,7 +2476,129 @@ client.on("interactionCreate", async (interaction) => {
         ephemeral: true
       });
     }
+/* --- Economy Games --- */  
+if (commandName === "battle") return runDinoBattle(interaction, interaction.user, interaction.options.getUser("opponent"), interaction.options.getInteger("bet") || 0);
+    if (commandName === "coinflip") return interaction.reply(runCoinflip(interaction.user.id, interaction.options.getInteger("bet"), interaction.options.getString("side") || "heads"));
+    if (commandName === "spin") return interaction.reply(runSpin(interaction.user.id, interaction.options.getInteger("bet")));
+    if (commandName === "mines") return runMines(interaction, interaction.user, interaction.options.getInteger("bet"), interaction.options.getInteger("bombs") || 3);
+    if (commandName === "rps") return runRps(interaction, interaction.user, interaction.options.getUser("opponent"), interaction.options.getInteger("bet") || 0);
+    if (commandName === "chess") return runChess(interaction, interaction.user, interaction.options.getUser("opponent"), interaction.options.getInteger("bet") || 0);
+    if (commandName === "uno") return runUno(interaction, interaction.user, interaction.options.getUser("opponent"), interaction.options.getInteger("bet") || 0);
+    if (commandName === "typingrace") return runTypingRace(interaction, interaction.user, interaction.options.getInteger("bet"));
+     
+/* --- PREFIX SELECTOR --- */     
+if (commandName === "prefix") {
+      if (interaction.user.id !== interaction.guild?.ownerId) {
+        return interaction.reply({ content: "❌ Only the **Server Owner** can select the server prefix.", ephemeral: true });
+      }
+      const cur = getSelectedServerPrefix(interaction.guildId);
+      const embed = new EmbedBuilder()
+        .setColor(0x8600FF)
+        .setTitle("🔤 Select Server Command Prefix")
+        .setDescription(`Current Prefix: **\`${cur}\`**\n\nChoose a prefix below for economy, dinosaur hunting/battles/auctions, mini-games, and basic moderation (\`ban\`, \`mute\`, \`warn\`).`);
+      const select = new StringSelectMenuBuilder()
+        .setCustomId("prefix_select_menu")
+        .setPlaceholder("Choose a prefix")
+        .addOptions(ALLOWED_PREFIXES.map(p => ({ label: p, value: p, description: `Use "${p} <command>"` })));
+      return interaction.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(select)], ephemeral: true });
+    }
 
+    /* --- HUNT / ZOO / TEAM / OPEN / EQUIP / DAILY / QUEST / AUCTION --- */ 
+    if (commandName === "hunt") {
+      const res = performHunt(interaction.user.id);
+      return interaction.reply(res.ok ? { embeds: res.embeds } : { content: res.text, ephemeral: true });
+    }
+
+    if (commandName === "zoo") {
+      const target = interaction.options.getUser("user") || interaction.user;
+      return interaction.reply({ embeds: [buildZooEmbed(target)] });
+    }
+
+    if (commandName === "team") {
+      const u = getEconomyUser(interaction.user.id);
+      const rawInputs = [
+        interaction.options.getString("dino1"),
+        interaction.options.getString("dino2"),
+        interaction.options.getString("dino3")
+      ].filter(Boolean);
+      if (!rawInputs.length) return interaction.reply({ embeds: [buildZooEmbed(interaction.user)] });
+      const newWarriors = [];
+      for (const nameStr of rawInputs.slice(0, MAX_WARRIORS)) {
+        const d = findDinoByIdOrName(nameStr);
+        if (!d || (u.dinos[d.id] || 0) < 1) return interaction.reply({ content: `❌ You don't own **${nameStr}**.`, ephemeral: true });
+        if (!newWarriors.includes(d.id)) newWarriors.push(d.id);
+      }
+      u.warriors = newWarriors;
+      saveEconomy();
+      return interaction.reply({ content: `🛡️ Set **${newWarriors.length}** active warrior(s) for battles!` });
+    }
+
+    if (commandName === "open") {
+      const res = performOpenBox(interaction.user.id, interaction.options.getString("box"));
+      return interaction.reply({ content: res.text, ephemeral: !res.ok });
+    }
+
+    if (commandName === "equip") {
+      const wName = interaction.options.getString("weapon").trim().toLowerCase();
+      const u = getEconomyUser(interaction.user.id);
+      const found = WEAPON_CATALOG.find(w => w.name.toLowerCase() === wName || w.id === wName);
+      if (!found || !u.weapons.includes(found.id)) return interaction.reply({ content: "❌ You don't own that weapon.", ephemeral: true });
+      u.equippedWeaponId = found.id;
+      saveEconomy();
+      return interaction.reply({ content: `⚔️ Equipped ${found.emoji} **${found.name}**!` });
+    }
+
+    if (commandName === "daily") {
+      const res = performDaily(interaction.user.id);
+      return interaction.reply({ content: res.text, ephemeral: !res.ok });
+    }
+
+    if (commandName === "quest") {
+      return interaction.reply({ embeds: [buildQuestEmbed(interaction.user)] });
+    }
+
+    if (commandName === "auction") {
+      settleExpiredAuctions();
+      const sub = interaction.options.getSubcommand();
+      if (sub === "list") {
+        const dino = findDinoByIdOrName(interaction.options.getString("dino"));
+        const startBid = interaction.options.getInteger("start_bid");
+        const durMs = ms(interaction.options.getString("duration"));
+        if (!durMs || durMs < 10000 || durMs > 7 * 24 * 3600000) return interaction.reply({ content: "❌ Invalid duration (e.g. `10m`, `1h`, `12h`).", ephemeral: true });
+        if (startBid < 10) return interaction.reply({ content: "❌ Starting bid must be at least 10.", ephemeral: true });
+        if (!dino || !["rare", "epic", "legendary", "mythic"].includes(dino.tierKey)) return interaction.reply({ content: "❌ Only **Rare, Epic, Legendary, or Mythic** dinosaurs can be auctioned.", ephemeral: true });
+        const seller = getEconomyUser(interaction.user.id);
+        if ((seller.dinos[dino.id] || 0) < 1) return interaction.reply({ content: `❌ You don't own **${dino.name}**.`, ephemeral: true });
+        seller.dinos[dino.id] -= 1;
+        seller.warriors = seller.warriors.filter(id => id !== dino.id);
+        saveEconomy();
+        const aucId = `auc_${crypto.randomBytes(3).toString("hex")}`;
+        const endsAt = Date.now() + durMs;
+        auctionsDB.push({ id: aucId, sellerId: interaction.user.id, dinoId: dino.id, dinoName: dino.name, dinoEmoji: dino.emoji, tierLabel: dino.tierLabel, highestBid: startBid, highestBidderId: null, endsAt, ended: false });
+        saveAuctions();
+        return interaction.reply({ content: `🏛️ Listed ${dino.emoji} **${dino.name}** (*${dino.tierLabel}*)! ID: \`${aucId}\` | Min Bid: **${startBid.toLocaleString()}** | Ends <t:${Math.floor(endsAt / 1000)}:R>` });
+      }
+      if (sub === "bid") {
+        const aucId = interaction.options.getString("auction_id").trim();
+        const bidAmt = interaction.options.getInteger("amount");
+        const auc = auctionsDB.find(a => a.id === aucId && !a.ended);
+        if (!auc) return interaction.reply({ content: "❌ Active auction not found.", ephemeral: true });
+        if (bidAmt <= auc.highestBid) return interaction.reply({ content: `❌ Bid must be greater than **${auc.highestBid.toLocaleString()}**.`, ephemeral: true });
+        const bidder = getEconomyUser(interaction.user.id);
+        if (bidder.balance < bidAmt) return interaction.reply({ content: "❌ Insufficient currency balance.", ephemeral: true });
+        auc.highestBid = bidAmt;
+        auc.highestBidderId = interaction.user.id;
+        saveAuctions();
+        return interaction.reply({ content: `🔨 ${interaction.user} bid **${bidAmt.toLocaleString()}** on ${auc.dinoEmoji} **${auc.dinoName}** (\`${auc.id}\`)!` });
+      }
+      if (sub === "active") {
+        const active = auctionsDB.filter(a => !a.ended);
+        if (!active.length) return interaction.reply({ content: "🏛️ No active global auctions right now.", ephemeral: true });
+        const lines = active.slice(0, 10).map(a => `• **ID:** \`${a.id}\` | ${a.dinoEmoji} **${a.dinoName}** (*${a.tierLabel}*) | Bid: **${a.highestBid.toLocaleString()}** ${a.highestBidderId ? `by <@${a.highestBidderId}>` : "(No bids)"} | Ends <t:${Math.floor(a.endsAt / 1000)}:R>`);
+        return interaction.reply({ embeds: [new EmbedBuilder().setColor(0x8600FF).setTitle("🏛️ Global Dinosaur Auctions").setDescription(lines.join("\n\n"))] });
+      }
+    }
+     
     /* --- SET OR CHANGE SERVER OWNER PIN --- */
     if (commandName === "setpin") {
       if (!isServerOwner(interaction.user, interaction.guild)) {
@@ -3206,6 +4418,17 @@ Permanent Ban
   ========================================================= */
   if (interaction.isStringSelectMenu()) {
 
+/* --- PREFIX SELECTOR --- */
+if (interaction.customId === "prefix_select_menu") {
+      if (interaction.user.id !== interaction.guild?.ownerId) {
+        return interaction.reply({ content: "❌ Only the **Server Owner** can select the server prefix.", flags: MessageFlags.Ephemeral });
+      }
+      const chosen = interaction.values[0];
+      if (!ALLOWED_PREFIXES.includes(chosen)) return interaction.reply({ content: "❌ Invalid prefix.", flags: MessageFlags.Ephemeral });
+      setSelectedServerPrefix(interaction.guildId, chosen);
+      return interaction.update({ content: `✅ Server prefix set to **\`${chosen}\`**!`, embeds: [], components: [] }).catch(() => {});
+    }
+     
     /* --- 1. VOICE CONTROL PANEL DROPDOWNS --- */
     if (interaction.customId === "vc_settings_menu" || interaction.customId === "vc_permissions_menu") {
       const selected = interaction.values[0];
