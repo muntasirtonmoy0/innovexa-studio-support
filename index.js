@@ -1859,10 +1859,6 @@ const commands = [
     .setDescription("View official server rules"),
 
   new SlashCommandBuilder()
-    .setName("punishments")
-    .setDescription("View server punishment guidelines"),
-
-  new SlashCommandBuilder()
     .setName("tac")
     .setDescription("View community terms and conditions"),
 
@@ -3269,151 +3265,152 @@ if (commandName === "prefix") {
     /* --- HELP MENU COMMAND --- */
     if (commandName === "help") {
       const selectedCategory = interaction.options.getString("category") || "overview";
+      const activePrefix = typeof getSelectedServerPrefix === "function"
+        ? getSelectedServerPrefix(interaction.guildId)
+        : (getGuildConfig(interaction.guildId)?.prefix || "In");
 
       function getHelpEmbed(cat) {
         if (cat === "info") {
           return new EmbedBuilder()
-            .setColor(0x8600FF)
-            .setTitle("🌐 Server & General Commands")
+            .setColor(0x7C3AED)
+            .setAuthor({ name: "Innovexa Studio • Command Hub", iconURL: THUMBNAIL })
+            .setTitle("🌐 General & Server Information")
             .setDescription(
-              "• **`/rules`**\n" +
-              "  └ View the official Discord server rules and conduct policy.\n\n" +
-              "• **`/punishments`**\n" +
-              "  └ View punishment ladders and enforcement guidelines.\n\n" +
-              "• **`/tac`**\n" +
-              "  └ Read community terms and conditions.\n\n" +
-              "• **`/panel`**\n" +
-              "  └ Deploy the interactive support ticket dropdown panel.\n\n" +
-              "• **`/elevate [target] [reason]`**\n" +
-              "  └ Escalate a claimed ticket to the Server Owner or CEO.\n\n" +
-              "• **`/help [category]`**\n" +
-              "  └ Open this interactive command directory."
+              "Core server policies, support tickets, and escalation controls.\n\n" +
+              "🔹 **`/rules`**\n" +
+              "└ Read the official bot rules and fair-play policy.\n" +
+              "🔹 **`/tac`**\n" +
+              "└ View the Terms & Conditions for using the bot.\n" +
+              "🔹 **`/panel`**\n" +
+              "└ Post the interactive support ticket dropdown panel.\n" +
+              "🔹 **`/elevate [target] [reason]`**\n" +
+              "└ Escalate a claimed ticket to the **Server Owner** or **CEO**.\n" +
+              "🔹 **`/help [category]`**\n" +
+              "└ Browse commands interactively by category."
             )
             .setImage(BANNER)
-            .setFooter({ text: "Category: General & Information" })
+            .setFooter({ text: `Active Prefix: "${activePrefix}" • General & Info` })
             .setTimestamp();
         }
 
         if (cat === "setup") {
           return new EmbedBuilder()
-            .setColor(0x8600FF)
-            .setTitle("⚙️ Server Setup & AutoMod Commands")
+            .setColor(0x7C3AED)
+            .setAuthor({ name: "Innovexa Studio • Command Hub", iconURL: THUMBNAIL })
+            .setTitle("🦖 Prefix, Dino Economy, Crates & Auctions")
             .setDescription(
-              "• **`/setpin [pin] [old_pin]`**\n" +
-              "  └ *(Server Owner)* Set or change your personal 2FA PIN for major actions.\n\n" +
-              "• **`/unlock [pin]`** & **`/lock`**\n" +
-              "  └ *(Server Owner)* Unlock a 10-minute major-action session or lock immediately.\n\n" +
-              "• **`/staff add | remove | linkrole | list`**\n" +
-              "  └ *(Server Owner)* Assign CEO, Senior Admin, Junior Admin, Manager, Senior Mod, Junior Mod, or Support Staff.\n\n" +
-              "• **`/setchannel [feature] [channel]`**\n" +
-              "  └ Set channels for Welcome, Goodbye, Boost, Level Up, Invite Log, Ticket Log, Join-to-Create VC, Audit Log, or Anti-Nuke Log.\n\n" +
-              "• **`/setmessage [type] [message]`**\n" +
-              "  └ Customize Welcome, Goodbye, or Boost text using `{user}`, `{username}`, `{server}`, `{memberCount}`.\n\n" +
-              "• **`/badword add | remove | list`**\n" +
-              "  └ Manage AutoMod words in `warn`, `mute`, or `ban` tiers."
+              `Use slash commands or your server prefix (**\`${activePrefix}\`**) where supported.\n\n` +
+              "**🔤 Prefix & Collection**\n" +
+              "🔹 **`/prefix select`** — *(Owner)* Choose `I`, `In`, `Inx`, `Ins`, `Innovexa`, or `Is`.\n" +
+              `🔹 **\`${activePrefix} hunt\`** / **`/hunt`** — Hunt 30 dinos across 6 tiers (costs 10; gems add rolls).\n` +
+              `🔹 **\`${activePrefix} zoo\`** / **`/zoo [user]`** — View collected dinos, balance, gems, crates & warriors.\n` +
+              `🔹 **\`${activePrefix} team <dinos>\`** / **`/team`** — Set up to **3 active warriors** for battle.\n\n` +
+              "**🧰 Crates, Weapons, Rewards & Auctions**\n" +
+              `🔹 **\`${activePrefix} open <lootbox|weapon>\`** / **`/open`** — Open Lootboxes (gems + dinos) or Weapon Crates.\n` +
+              `🔹 **\`${activePrefix} equip <weapon>\`** / **`/equip`** — Equip a weapon for +ATK, +HP, or +Heal.\n` +
+              `🔹 **\`${activePrefix} daily\`** / **`/daily`** — Claim 24h currency, XP & lootbox reward.\n` +
+              `🔹 **\`${activePrefix} quest\`** / **`/quest`** — Track and auto-claim daily quests.\n` +
+              `🔹 **\`${activePrefix} auction <active|bid>\`** / **`/auction`** — List Rare+ dinos or bid globally.`
             )
             .setImage(BANNER)
-            .setFooter({ text: "Category: Server Setup & AutoMod" })
+            .setFooter({ text: `Active Prefix: "${activePrefix}" • Dino Economy & Auctions` })
             .setTimestamp();
         }
 
         if (cat === "stats") {
           return new EmbedBuilder()
-            .setColor(0x8600FF)
-            .setTitle("📊 Levels, Invites & Ranking")
+            .setColor(0x7C3AED)
+            .setAuthor({ name: "Innovexa Studio • Command Hub", iconURL: THUMBNAIL })
+            .setTitle("📊 Levels, Activity, AFK & Invites")
             .setDescription(
-              "• **`/level [user]`**\n" +
-              "  └ Check current chat level, XP progress, and visual status bar.\n\n" +
-              "• **`/leaderboard [type]`**\n" +
-              "  └ View top 10 rankings for **Levels** or **Daily Chat**.\n\n" +
-              "• **`/messages [user]`**\n" +
-              "  └ View all-time, monthly, weekly, and daily chat message counts.\n\n" +
-              "• **`/afk [reason]`**\n" +
-              "  └ Set an AFK status with automated mention tracking.\n\n" +
-              "• **`/invite [user]`**\n" +
-              "  └ View quick overview of your real, fake, and left invites.\n\n" +
-              "• **`/invitedashboard [user]`**\n" +
-              "  └ Display complete invite analytics, efficiency ratings, and tracked joins."
+              "Track progression, chat activity, AFK mentions, and server invites.\n\n" +
+              "🔹 **`/level [user]`** — Check current level, XP, and progress bar.\n" +
+              "🔹 **`/leaderboard [type]`** — View top 10 rankings for **Levels** or **Daily Chat**.\n" +
+              "🔹 **`/messages [user]`** — View all-time, monthly, weekly & daily message counts.\n" +
+              "🔹 **`/afk [reason]`** — Set AFK status and receive missed mention summaries on return.\n" +
+              "🔹 **`/invite [user]`** & **`/invitedashboard [user]`** — Inspect real, fake, and left invites."
             )
             .setImage(BANNER)
-            .setFooter({ text: "Category: Levels & Invites" })
+            .setFooter({ text: `Active Prefix: "${activePrefix}" • Stats & Invites` })
             .setTimestamp();
         }
 
         if (cat === "games") {
           return new EmbedBuilder()
-            .setColor(0x8600FF)
-            .setTitle("🎮 Mini-Games & Arcade")
+            .setColor(0x7C3AED)
+            .setAuthor({ name: "Innovexa Studio • Command Hub", iconURL: THUMBNAIL })
+            .setTitle("⚔️ Battles, Gambling & Mini-Games")
             .setDescription(
-              "• **`/snake`**\n" +
-              "  └ Play the retro button-controlled Snake arcade game in Discord.\n\n" +
-              "• **`/tictactoe [mode] [opponent]`**\n" +
-              "  └ Play Tic Tac Toe against an unbeatable AI or challenge a friend.\n\n" +
-              "• **`/wordle`**\n" +
-              "  └ Guess the secret 5-letter word within 6 tries.\n\n" +
-              "• **`/guess`**\n" +
-              "  └ Guess the hidden number between 1 and 10,000.\n\n" +
-              "• **`/howgay [user]`**\n" +
-              "  └ Fun meter calculating random rainbow affinity score."
+              `Play with slash commands or prefix (**\`${activePrefix}\`**).\n\n` +
+              "**🦖 Dinosaur Battles**\n" +
+              `🔹 **\`${activePrefix} battle\`** / **`/battle`** — Normal battle for XP & crate drops.\n` +
+              `🔹 **\`${activePrefix} battle @user <bet>\`** — PvP battle wagering currency.\n\n` +
+              "**🎰 Gambling & Arcade**\n" +
+              `🔹 **\`${activePrefix} coinflip <bet> [heads|tails]\`** / **`/coinflip`** — 50/50 coin bet.\n` +
+              `🔹 **\`${activePrefix} spin <bet>\`** / **`/spin`** — 3-reel dinosaur slot machine.\n` +
+              `🔹 **\`${activePrefix} mines <bet> [bombs]\`** / **`/mines`** — Uncover gems & cash out before hitting a bomb.\n` +
+              `🔹 **\`${activePrefix} rps [@user] [bet]\`** / **`/rps`** — Rock Paper Scissors (bot or friend).\n` +
+              `🔹 **\`${activePrefix} chess [@user] [bet]\`** / **`/chess`** — Chess match via moves like \`e2 e4\`.\n` +
+              `🔹 **\`${activePrefix} uno [@user] [bet]\`** / **`/uno`** — Button-controlled UNO card match.\n` +
+              `🔹 **\`${activePrefix} typingrace <bet>\`** / **`/typingrace`** — Solo word race; each word adds +0.25x, 1 mistake loses all.\n` +
+              "🔹 **`/tictactoe`**, **`/guess`**, **`/wordle`**, **`/snake`**, **`/howgay`** — Classic mini-games & fun."
             )
             .setImage(BANNER)
-            .setFooter({ text: "Category: Mini-Games & Fun" })
+            .setFooter({ text: `Active Prefix: "${activePrefix}" • Battles & Games` })
             .setTimestamp();
         }
 
         if (cat === "mod") {
           return new EmbedBuilder()
-            .setColor(0xED4245)
-            .setTitle("🛡️ Staff & Moderation Commands")
+            .setColor(0xEF4444)
+            .setAuthor({ name: "Innovexa Studio • Command Hub", iconURL: THUMBNAIL })
+            .setTitle("🛡️ Staff, Security PIN & Moderation")
             .setDescription(
-              "• **`/warn [user] [reason]`** — Issue a server warning.\n" +
-              "• **`/warnlist [user]`** — Inspect all active warnings on a user.\n" +
-              "• **`/removewarn [user] [number]`** — Delete a specific warning index.\n" +
-              "• **`/clearwarn [user]`** — Clear all warning records for a user.\n" +
-              "• **`/mute [user] [reason]`** — Timeout a member for 28 days.\n" +
-              "• **`/unmute [user]`** — Remove active timeout from a member.\n" +
-              "• **`/mutehistory [user]`** — Inspect full past timeout logs.\n" +
-              "• **`/banhistory [user]`** — Inspect past temporary/permanent ban logs.\n" +
-              "• **`/gstart [duration] [winners] [prize]`** — Host persistent giveaway.\n" +
-              "• **`/greroll [message_id]`** — Reroll giveaway winner from stored entries.\n" +
-              "• **`/ban [user] [duration] [reason]`** — *(Admin)* Temp/perm ban.\n" +
-              "• **`/unban [user_id]`** — *(Admin)* Revoke a server ban by user ID.\n" +
-              "• **`/leveladd [user] [amount]`** — *(Admin)* Award bonus chat levels."
+              "Role hierarchy, per-server owner PIN lock, moderation, and giveaways.\n\n" +
+              "**🔐 Owner Security & Staff Hierarchy**\n" +
+              "🔹 **`/setpin [pin] [old_pin]`** — *(Owner)* Set or rotate your server's 2FA PIN.\n" +
+              "🔹 **`/unlock [pin]`** & **`/lock`** — *(Owner)* Unlock a 10-min major-action session or lock now.\n" +
+              "🔹 **`/staff <add|remove|linkrole|list>`** — *(Owner)* Manage CEO, Admins, Manager, Mods & Support.\n\n" +
+              "**⚙️ Channels, AutoMod & Moderation**\n" +
+              "🔹 **`/setchannel`** & **`/setmessage`** — *(Admin)* Configure feature channels & templates.\n" +
+              "🔹 **`/badword <add|remove|list>`** — *(Admin)* Manage `warn`, `mute`, and `ban` AutoMod filters.\n" +
+              `🔹 **\`${activePrefix} warn|mute|ban @user <reason>\`** — Quick prefix moderation.\n` +
+              "🔹 **`/warn`**, **`/warnlist`**, **`/removewarn`**, **`/clearwarn`**, **`/mute`**, **`/unmute`**, **`/mutehistory`**\n" +
+              "🔹 **`/ban`**, **`/unban`**, **`/banhistory`**, **`/leveladd`**, **`/gstart`**, **`/greroll`**"
             )
             .setImage(BANNER)
-            .setFooter({ text: "Category: Staff Moderation (Restricted)" })
+            .setFooter({ text: `Active Prefix: "${activePrefix}" • Staff & Security` })
             .setTimestamp();
         }
 
         return new EmbedBuilder()
-          .setColor(0x8600FF)
-          .setAuthor({ name: "Bot Command Directory", iconURL: THUMBNAIL })
-          .setTitle("📖 Command Directory")
+          .setColor(0x7C3AED)
+          .setAuthor({ name: "Innovexa Studio • Command Hub", iconURL: THUMBNAIL })
+          .setTitle("📖 Innovexa Studio — Command Directory")
           .setDescription(
-            "Welcome to the official command manual.\n" +
-            "Select a module from the dropdown menu below to inspect commands, parameters, and usage.\n\n" +
-            "**Directory Modules:**\n" +
-            "• **🌐 General & Server** — Rules, guidelines, tickets, and terms\n" +
-            "• **⚙️ Server Setup & AutoMod** — Owner PIN, staff roles, channels, messages, and bad words\n" +
-            "• **📊 Levels & Invites** — Level progress, invite tracking, AFK, and leaderboards\n" +
-            "• **🎮 Mini-Games** — Snake, TicTacToe, Wordle, and Guess games\n" +
-            "• **🛡️ Staff Operations** — Full moderation suite and giveaway system"
+            `Current Server Prefix: **\`${activePrefix}\`** • Slash (**\`/\`**) & Prefix commands supported.\n\n` +
+            "Select a category from the dropdown below to view every command in detail:\n\n" +
+            "• **🌐 General & Info** — Rules, T&C, ticket panel & `/elevate`\n" +
+            "• **🦖 Dino Economy & Auctions** — `/prefix select`, hunt, zoo, warriors, crates, daily, quests & auctions\n" +
+            "• **⚔️ Battles & Games** — Normal & bet battles, coinflip, spin, mines, RPS, chess, UNO & typing race\n" +
+            "• **📊 Stats & Invites** — Levels, leaderboards, message stats, AFK & invite tracking\n" +
+            "• **🛡️ Staff & Security** — Owner PIN (`/setpin`, `/unlock`, `/lock`), staff hierarchy, AutoMod & moderation"
           )
           .setImage(BANNER)
-          .setFooter({ text: "Use the dropdown below to browse" })
+          .setFooter({ text: "Use the dropdown menu below to switch categories" })
           .setTimestamp();
       }
 
       const menu = new StringSelectMenuBuilder()
         .setCustomId("help_menu")
-        .setPlaceholder("Select a command module to inspect")
+        .setPlaceholder("Choose a command category...")
         .addOptions([
-          { label: "Overview", description: "Main directory page", emoji: "📖", value: "overview" },
-          { label: "General & Server Info", description: "Server rules, tickets, and guidelines", emoji: "🌐", value: "info" },
-          { label: "Server Setup & AutoMod", description: "Owner PIN, staff roles, channels, messages, and bad words", emoji: "⚙️", value: "setup" },
-          { label: "Levels & Invites", description: "Level cards, invite stats, and leaderboards", emoji: "📊", value: "stats" },
-          { label: "Mini-Games & Fun", description: "Snake, TicTacToe, Wordle, and Guess", emoji: "🎮", value: "games" },
-          { label: "Staff & Moderation", description: "Warns, mutes, bans, and giveaways", emoji: "🛡️", value: "mod" }
+          { label: "Overview", description: "Main hub & category summary", emoji: "📖", value: "overview" },
+          { label: "General & Info", description: "Rules, T&C, ticket panel & elevate", emoji: "🌐", value: "info" },
+          { label: "Dino Economy & Auctions", description: "Prefix, hunt, zoo, warriors, crates & auctions", emoji: "🦖", value: "setup" },
+          { label: "Battles & Games", description: "Battles, coinflip, spin, mines, RPS, chess, UNO & typing race", emoji: "⚔️", value: "games" },
+          { label: "Stats & Invites", description: "Levels, leaderboards, messages, AFK & invites", emoji: "📊", value: "stats" },
+          { label: "Staff & Security", description: "Owner PIN, staff roles, AutoMod & moderation", emoji: "🛡️", value: "mod" }
         ]);
 
       const selectRow = new ActionRowBuilder().addComponents(menu);
@@ -3431,9 +3428,8 @@ if (commandName === "prefix") {
 
       collector.on("collect", async (i) => {
         if (i.isStringSelectMenu() && i.customId === "help_menu") {
-          const selected = i.values[0];
           await i.update({
-            embeds: [getHelpEmbed(selected)],
+            embeds: [getHelpEmbed(i.values[0])],
             components: [selectRow]
           }).catch(() => {});
         }
@@ -3626,113 +3622,51 @@ if (commandName === "prefix") {
       });
     }
 
-    /* --- RULES --- */
+    /* --- BOT RULES (ALL SERVERS) --- */
     if (commandName === "rules") {
       const embed = new EmbedBuilder()
         .setColor(0x8600FF)
-        .setTitle(`📘 ${interaction.guild.name} — Official Server Rules`)
-        .setDescription(`
-# 📘 ${interaction.guild.name} — Official Server Rules
-
-━━━━━━━━━━━━━━
-
-## 💬 **1. Chat Rules**
-➤ Keep the chat clean, friendly, and respectful. Toxicity, harassment, hate speech, discrimination, excessive swearing, spam, or inappropriate behavior is strictly prohibited.
-
-━━━━━━━━━━━━━━
-
-## 📢 **2. Proper Channel Usage**
-➤ Use channels correctly and avoid unnecessary spam, advertising, or disruptive behavior. Keep conversations meaningful and respectful.
-
-━━━━━━━━━━━━━━
-
-## ⚠️ **3. Follow Discord Guidelines**
-➤ All members must follow the official Discord Community Guidelines and Terms of Service at all times.
-
-━━━━━━━━━━━━━━
-
-## 🔊 **4. Voice Chat Rules**
-➤ Keep VC conversations friendly and appropriate. Mic spam, earrape, excessive background noise, harassment, or disturbing others is not allowed.
-
-━━━━━━━━━━━━━━
-
-## ⚖️ **5. Punishment System**
-➤ Warning → Mute → Kick → Temporary Ban → Permanent Ban
-
-━━━━━━━━━━━━━━
-
-## 💡 **6. Use Common Sense**
-➤ Not every situation can be covered by rules. Use common sense and respect staff decisions to help maintain a positive and fair community.
-`)
-        .setThumbnail(interaction.guild.iconURL() || THUMBNAIL)
+        .setTitle("📘 Innovexa Studio Bot — Official Bot Rules")
+        .setDescription(
+          "Please follow these rules whenever using this bot in any server:\n\n" +
+          "## 1. Fair Play & No Exploits\n" +
+          "➤ Do not exploit bugs, glitches, auction loopholes, battle/gamble mechanics, or command cooldowns.\n\n" +
+          "## 2. No Automation, Macros, or Spam\n" +
+          "➤ Self-bots, spam scripts, auto-typers/macros in `typingrace`, or flooding commands across channels is prohibited.\n\n" +
+          "## 3. Respectful & Safe Usage\n" +
+          "➤ Do not use bot commands, tickets, or custom messages to harass others, evade bans, or violate Discord Terms of Service.\n\n" +
+          "## 4. Security & Account Responsibility\n" +
+          "➤ Keep your security PINs and server configurations private. **Innovexa Studio** is not responsible for actions taken by compromised accounts.\n\n" +
+          "## 5. Enforcement\n" +
+          "➤ Rule violations or abuse may result in warnings, feature restrictions, or a global bot blacklist."
+        )
+        .setThumbnail(interaction.client.user.displayAvatarURL({ dynamic: true }) || THUMBNAIL)
         .setImage(BANNER)
-        .setFooter({ text: `${interaction.guild.name} Rules` })
-        .setTimestamp();
-
-      return interaction.reply({ embeds: [embed] });
-    }
-
-    /* --- PUNISHMENTS --- */
-    if (commandName === "punishments") {
-      const embed = new EmbedBuilder()
-        .setColor(0x8600FF)
-        .setTitle(`⚖️ ${interaction.guild.name} • Punishment System`)
-        .setDescription(`
-━━━━━━━━━━━━━━━━━━━━━━━━
-# **📢 Punishment System**
-━━━━━━━━━━━━━━━━━━━━━━━━
-
-➤ Most violations will result in a Warning first.
-
-➤ Repeated violations may result in Mutes, Temporary Bans, or Permanent Bans.
-
-━━━━━━━━━━━━━━
-
-➤ Chat Spam & Advertising
-Warning → Mute → Temporary Ban
-
-➤ Harassment, Toxicity & Hate Speech
-Warning → Mute → Temporary Ban → Permanent Ban
-
-➤ Staff Impersonation
-Warning → Temporary Ban → Permanent Ban
-
-➤ Ban Evasion
-Permanent Ban
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-# **⚠️ Final Notice**
-━━━━━━━━━━━━━━━━━━━━━━━━
-
-➤ Staff may issue harsher punishments immediately for severe offenses.
-
-➤ Use common sense and respect staff decisions. Staff decisions are final.
-`)
-        .setImage(BANNER)
-        .setFooter({ text: `${interaction.guild.name} Guidelines` })
+        .setFooter({ text: "Innovexa Studio • Bot Rules" })
         .setTimestamp();
 
       return interaction.reply({ embeds: [embed] });
     }
 
     /* --- TAC --- */
-    if (commandName === "tac") {
+   if (commandName === "tac") {
       const embed = new EmbedBuilder()
         .setColor(0x8600FF)
-        .setTitle(`📋 ${interaction.guild.name} • Terms & Conditions`)
-        .setDescription(`
-━━━━━━━━━━━━━━━━━━━━━━
-**📢 Community Policy**
-━━━━━━━━━━━━━━━━━━━━━━
-
-➤ By participating in **${interaction.guild.name}**, you agree to follow all server rules and Discord's official Terms of Service.
-
-➤ Members are responsible for the security of their own Discord accounts.
-
-➤ Moderation actions are enforced based on evidence and severity at staff discretion.
-`)
+        .setTitle("📋 Innovexa Studio Bot — Terms & Conditions")
+        .setDescription(
+          "By adding or using this bot in your server, you agree to the following Terms & Conditions:\n\n" +
+          "## 1. Service Availability\n" +
+          "➤ This bot is provided on an \"as-is\" and \"as-available\" basis by **Innovexa Studio**. Features, economy balances, and uptime may change or experience maintenance without prior notice.\n\n" +
+          "## 2. Virtual Economy & Items\n" +
+          "➤ Currency, gems, lootboxes, weapon crates, weapons, dinosaurs, and global auctions are virtual game items with no real-world monetary value unless explicitly stated otherwise.\n\n" +
+          "## 3. Data & Server Configuration\n" +
+          "➤ The bot stores server settings (`server_configs.json`), moderation/stat logs, economy data (`economy.json`), and auction listings (`auctions.json`) to provide its features.\n\n" +
+          "## 4. Server Owner Responsibility\n" +
+          "➤ Server owners are responsible for bot permissions, role hierarchy, staff assignments, and setting a strong owner PIN (`/setpin`)."
+        )
+        .setThumbnail(interaction.client.user.displayAvatarURL({ dynamic: true }) || THUMBNAIL)
         .setImage(BANNER)
-        .setFooter({ text: `${interaction.guild.name} Terms` })
+        .setFooter({ text: "Innovexa Studio • Terms & Conditions" })
         .setTimestamp();
 
       return interaction.reply({ embeds: [embed] });
