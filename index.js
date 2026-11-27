@@ -87,10 +87,10 @@ const crypto = require("crypto");
    IMAGES
 ========================= */
 const BANNER =
-  "https://cdn.discordapp.com/attachments/1508843787064185103/1509148139024547891/1000016350-ezremove.gif?ex=6a181f3a&is=6a16cdba&hm=e14c4ae7628e82a918334f96f5f5db5401a2f474801519145a2194f0bd0ae53e&";
+  "https://res.cloudinary.com/retvp8pw/image/upload/v1795807464/innovexa-studio_banner_gif_1.gif";
 
 const THUMBNAIL =
-  "https://cdn.discordapp.com/attachments/1508843787064185103/1509148049375498260/1000016387-ezremove.gif?ex=6a181f25&is=6a16cda5&hm=f50b3cd0602727d2db53802bfb335d2e24757b2f79f355ea07f7668b801ed60f&";
+  "https://res.cloudinary.com/retvp8pw/image/upload/v1795807261/innovexa-studio_banner_gif.gif";
 
 /* =========================
    DEFAULT FALLBACK CHANNEL IDS (OPTIONAL)
